@@ -216,8 +216,18 @@ def suite_diff(base_run: RunResult, head_run: RunResult) -> dict:
     """Same-suite comparison over whatever targets were run on both refs."""
     base_fail = sorted(o.nodeid for o in base_run.outcomes if o.outcome == "failed")
     head_fail = sorted(o.nodeid for o in head_run.outcomes if o.outcome == "failed")
+    base_nodes = {o.nodeid for o in base_run.outcomes}
+    head_nodes = {o.nodeid for o in head_run.outcomes}
+    execution_errors = {
+        run.ref: sorted(o.nodeid for o in run.outcomes if o.outcome == "error")
+        for run in (base_run, head_run)
+    }
     return {
-        "complete": not base_run.collection_error and not head_run.collection_error,
+        "complete": (not base_run.collection_error and not head_run.collection_error
+                     and base_nodes == head_nodes and not any(execution_errors.values())),
+        "only_on_base": sorted(base_nodes - head_nodes),
+        "only_on_head": sorted(head_nodes - base_nodes),
+        "execution_errors": execution_errors,
         "base_failed": base_fail,
         "head_failed": head_fail,
         "new_failures_on_head": sorted(set(head_fail) - set(base_fail)),
