@@ -23,6 +23,15 @@ def render_markdown(payload: dict) -> str:
     ]
     for row in payload["verdicts"]:
         lines.append(f"| `{row['test']}` | {row['base'] or '-'} | {row['head'] or '-'} | **{row['verdict']}** |")
+    detailed = [row for row in payload["verdicts"] if row.get("base_failure_details") or row.get("head_failure_details")]
+    if detailed:
+        lines += ["", "## Failure evidence", "", "Inspect these failures before interpreting outcome transitions."]
+        for row in detailed:
+            lines += ["", f"### `{row['test']}`"]
+            for ref in ("base", "head"):
+                for failure in row.get(f"{ref}_failure_details", []):
+                    lines += ["", f"{ref}: {failure['phase']} / {failure['classification']}", "", "```text",
+                              failure['traceback'].replace("```", "~~~"), "```"]
     sd = payload["suite_diff"]
     lines += [
         "",
