@@ -313,3 +313,27 @@ def test_setup_error_marks_suite_incomplete(make_repo):
     data = json.loads((repo / 'r.json').read_text())
     assert not data['suite_diff']['complete']
     assert data['suite_diff']['execution_errors']['base'] == ['test_calc.py::test_x']
+
+
+def test_pytest_raises_missing_exception_is_negative_control(make_repo):
+    repo, base, head = make_repo(
+        {"calc.py": "def validate():\n    return None\n"},
+        {"calc.py": "def validate():\n    raise ValueError('invalid')\n",
+         "tests/test_calc.py": "import pytest\nfrom calc import validate\ndef test_validate():\n    with pytest.raises(ValueError):\n        validate()\n"},
+    )
+    proc = run_cli(repo, base, head, "--json-out", str(repo / "r.json"))
+    assert proc.returncode == 0, proc.stderr
+    report = json.loads((repo / "r.json").read_text())
+    assert report["summary"].get("fix_confirmed") == 1
+
+
+def test_explicit_pytest_fail_is_negative_control(make_repo):
+    repo, base, head = make_repo(
+        {"calc.py": "valid = False\n"},
+        {"calc.py": "valid = True\n",
+         "tests/test_calc.py": "import pytest\nfrom calc import valid\ndef test_valid():\n    if not valid:\n        pytest.fail('not valid')\n"},
+    )
+    proc = run_cli(repo, base, head, "--json-out", str(repo / "r.json"))
+    assert proc.returncode == 0, proc.stderr
+    report = json.loads((repo / "r.json").read_text())
+    assert report["summary"].get("fix_confirmed") == 1
