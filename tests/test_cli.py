@@ -239,3 +239,22 @@ def test_root_level_tests_are_not_production_sources(make_repo):
     data = json.loads((repo / 'r.json').read_text())
     assert data['summary']['fix_confirmed'] == 1
     assert 'test_calc' not in data['runs']['base']['imports']
+
+
+def test_unittest_setup_exception_not_fix_evidence(make_repo):
+    test = 'import unittest\nimport calc\nclass TestCalc(unittest.TestCase):\n    def setUp(self):\n        self.value = calc.new_api\n    def test_value(self):\n        self.assertEqual(self.value,1)\n'
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC+'\nnew_api=1\n', 'test_calc.py': test})
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    assert proc.returncode == 1
+    data = json.loads((repo / 'r.json').read_text())
+    assert data['summary'].get('fix_confirmed', 0) == 0
+    assert data['verdicts'][0]['base'] == 'error'
+
+
+def test_unexpected_call_exception_is_unrunnable(make_repo):
+    test = 'import calc\ndef test_value():\n    if calc.add(2,3) != 5:\n        raise ValueError("environment or API mismatch")\n'
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'test_calc.py': test})
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    assert proc.returncode == 1
+    data = json.loads((repo / 'r.json').read_text())
+    assert data['summary'].get('fix_confirmed', 0) == 0
