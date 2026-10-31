@@ -113,6 +113,9 @@ holds privileged credentials.
   `fix_confirmed`.
 - Environment-dependent failures (GPUs, network, optional deps) show up as
   they are; pr-control reports outcomes, it does not judge them.
+- Failed subtests sharing a parent nodeid are conservatively execution errors;
+  a later parent pass cannot erase them. Detailed subtest attribution is not
+  supported.
 - Unexpected call exceptions (including unittest setup errors) are classified
   as execution errors, not assertion failures. This is conservative: a real
   regression that raises a non-AssertionError needs manual investigation.
