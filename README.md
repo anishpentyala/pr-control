@@ -14,13 +14,31 @@ nothing: a test that also passes on the base ref is toothless as evidence of a
 fix. The evidence is the *difference*: fails on base, passes on head. Doing
 that by hand for every PR is tedious, so reviews skip it and useful evidence is missed.
 
-The two closest tools I compared against answer different questions:
+Historical fail-before/pass-after testing is an existing technique, not an
+invention of this project. Related tools include:
 
-- **pr-witness** runs the base commit's tests against PR code (old tests vs
-  new code) and flags withdrawn claims.
-- **diffproof** runs mutation testing on the diff (JS/TS).
-- **pr-control** runs the PR's *new and changed* tests against *both* refs
-  (Python/pytest), and diffs the same-suite results between them.
+- [mustfail](https://github.com/greenlitbooks/mustfail), which keeps tests and
+  reverts changed source in a worktree, runs positive and negative controls,
+  and heuristically distinguishes load failures from other detections. It
+  supports arbitrary check commands and file-level localization.
+- [pytest-fixed-by](https://ruachtov.ai/blog/fixed-by.html), whose published
+  protocol links individual tests to fix commits and replays today's tests
+  against pre-fix and post-fix source.
+- [verify-regression-tests](https://github.com/aiopshwang/verify-regression-tests),
+  an agent skill for checking that a frozen test fails at the intended defect
+  witness, rather than an unrelated gate or exception.
+- [greenproof](https://github.com/zxyasfas/greenproof), which checks original
+  test snapshots against changed code to investigate test-dependent greens.
+- [pytest-drift](https://pypi.org/project/pytest-drift/), which compares values
+  returned by tests across branches rather than ordinary assertion outcomes.
+
+pr-control's scope is a Python/pytest command that runs head tests against both
+source refs, records per-node transitions and bounded failure evidence, checks
+observed local import origins, and flags incomplete or incomparable suites.
+These are implementation choices, not a claim that this combination is unique.
+A failure-to-pass transition still needs inspection of the intended behavior.
+The comparisons above were checked against the projects' own descriptions on
+2026-10-31; they are not a benchmark or an independent audit of those tools.
 
 ## Install
 
