@@ -142,7 +142,10 @@ holds privileged credentials.
   supported.
 - Unexpected call exceptions (including unittest setup errors) are classified
   as execution errors, not assertion failures. This is conservative: a real
-  regression that raises a non-AssertionError needs manual investigation.
+  regression that raises an unexpected exception needs manual investigation.
+  Explicit `pytest.fail()` and missing `pytest.raises(...)` failures count as
+  assertion evidence alongside `AssertionError`. This classifies the failure,
+  not its cause; the bounded traceback still needs manual inspection.
   An AssertionError inside unittest setup cannot be separated from its test
   body by this diagnostic; inspect the failure before drawing conclusions.
 - `fix_confirmed` is per-test evidence in one environment, not a global
