@@ -271,3 +271,26 @@ def test_unittest_subtest_failure_not_overwritten_by_pass(make_repo):
     assert data['verdicts'][0]['base'] in ('failed', 'error')
     assert data['verdicts'][0]['head'] == 'passed'
     assert data['verdicts'][0]['verdict'] in ('fix_confirmed', 'unrunnable')
+
+
+def test_failure_evidence_kept_for_manual_interpretation(make_repo):
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'test_calc.py': FIX_TEST})
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'), '--md-out', str(repo / 'r.md'))
+    assert proc.returncode == 0
+    row = json.loads((repo / 'r.json').read_text())['verdicts'][0]
+    assert row['base_failure_details'][0]['phase'] == 'call'
+    assert row['base_failure_details'][0]['classification'] == 'failed'
+    assert 'AssertionError' in row['base_failure_details'][0]['traceback']
+    assert row['head_failure_details'] == []
+    assert 'Failure evidence' in (repo / 'r.md').read_text()
+
+
+def test_unexpected_exception_traceback_explains_unrunnable(make_repo):
+    test = 'import calc\ndef test_x():\n    if calc.add(2,3)!=5:\n        raise RuntimeError("synthetic dependency mismatch")\n'
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'test_calc.py': test})
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    assert proc.returncode == 1
+    row = json.loads((repo / 'r.json').read_text())['verdicts'][0]
+    assert row['verdict'] == 'unrunnable'
+    assert 'synthetic dependency mismatch' in row['base_failure_details'][0]['traceback']
+    assert row['base_failure_details'][0]['classification'] == 'error'
