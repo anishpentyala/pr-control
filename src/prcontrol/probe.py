@@ -23,7 +23,16 @@ def pytest_runtest_makereport(item, call):
 
 def pytest_runtest_logreport(report):
     row = _records.setdefault(report.nodeid, {})
-    row[report.when] = "error" if getattr(report, "pr_control_execution_error", False) else report.outcome
+    status = "error" if getattr(report, "pr_control_execution_error", False) else report.outcome
+    if report.failed and hasattr(report, "context"):
+        # Subtest reports share the parent nodeid. Conservatively preserve
+        # their failure as an error instead of allowing a later parent-pass
+        # report to overwrite it. Detailed subtest attribution is unsupported.
+        status = "error"
+    rank = {"passed": 0, "skipped": 1, "failed": 2, "error": 3}
+    previous = row.get(report.when)
+    if previous is None or rank[status] > rank[previous]:
+        row[report.when] = status
 
 
 def pytest_collectreport(report):
