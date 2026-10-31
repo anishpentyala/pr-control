@@ -71,7 +71,10 @@ disappeared. An incomplete run is labeled and exits 1; it cannot confirm a fix.
 
 Markdown to stdout by default; `--json-out report.json` and
 `--md-out report.md` write files. Every report carries the environment
-fingerprint (python/pytest/platform) and the exact refs.
+fingerprint (python/pytest/platform) and the exact refs. Failed tests include
+phase, classification and a bounded traceback for manual interpretation.
+Reports can contain absolute paths and exception text from the tested project;
+review and redact them before sharing. Do not run tests with secrets in scope.
 
 Exit codes: `0` ran clean, `1` input/environment error (same commit, missing
 ref, nothing to run), `2` with `--fail-on regression` (new failures on head)

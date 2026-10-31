@@ -47,6 +47,7 @@ class RunResult:
     collection_error: str | None = None
     imports: dict = field(default_factory=dict)
     source_verified: bool = False
+    failure_details: dict = field(default_factory=dict)
 
 
 class PrControlError(RuntimeError):
@@ -175,7 +176,8 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             collection_error = "source provenance mismatch: " + json.dumps(bad_imports)
         return RunResult(ref=ref_name, returncode=proc.returncode, outcomes=outcomes,
                          collection_error=collection_error, imports=imports,
-                         source_verified=bool(imports) and not bad_imports)
+                         source_verified=bool(imports) and not bad_imports,
+                         failure_details=data.get("failure_details", {}))
 
 
 def verdicts(base_run: RunResult, head_run: RunResult) -> list[dict]:
@@ -204,7 +206,9 @@ def verdicts(base_run: RunResult, head_run: RunResult) -> list[dict]:
             verdict = "missing_on_head"
         else:
             verdict = f"{b or 'absent'}_on_base__{h or 'absent'}_on_head"
-        rows.append({"test": nodeid, "base": b, "head": h, "verdict": verdict})
+        rows.append({"test": nodeid, "base": b, "head": h, "verdict": verdict,
+                     "base_failure_details": base_run.failure_details.get(nodeid, []),
+                     "head_failure_details": head_run.failure_details.get(nodeid, [])})
     return rows
 
 
