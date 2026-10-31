@@ -16,7 +16,7 @@ def render_markdown(payload: dict) -> str:
         f"- base `{payload['base']}` vs head `{payload['head']}`",
         f"- env: python {payload['env']['python']}, pytest {payload['env']['pytest']}, {payload['env']['platform']}",
         "",
-        "## Verdicts (PR's changed tests)",
+        "## Verdicts (selected head tests)",
         "",
         "| test | base | head | verdict |",
         "| --- | --- | --- | --- |",
@@ -51,6 +51,8 @@ def render_markdown(payload: dict) -> str:
         f"- passes_both: {summary.get('passes_both', 0)}",
         f"- regression_introduced: {summary.get('regression_introduced', 0)}",
         f"- fails_both: {summary.get('fails_both', 0)}",
-        f"- unrunnable_on_base: {summary.get('unrunnable_on_base', 0)}",
+        f"- inconclusive: {summary.get('inconclusive', 0)}",
+        f"- unrunnable: {summary.get('unrunnable', 0)}",
+        f"- transition_unverified_source: {summary.get('transition_unverified_source', 0)}",
     ]
     return "\n".join(lines) + "\n"
