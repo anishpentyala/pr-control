@@ -7,6 +7,7 @@ from pathlib import Path
 
 _records = {}
 _collection_errors = []
+_failure_details = {}
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -29,6 +30,13 @@ def pytest_runtest_logreport(report):
         # their failure as an error instead of allowing a later parent-pass
         # report to overwrite it. Detailed subtest attribution is unsupported.
         status = "error"
+    if report.failed:
+        _failure_details.setdefault(report.nodeid, []).append({
+            "phase": report.when,
+            "classification": status,
+            "traceback": str(report.longrepr)[-8000:],
+            "subtest": str(getattr(report, "context", "")) or None,
+        })
     rank = {"passed": 0, "skipped": 1, "failed": 2, "error": 3}
     previous = row.get(report.when)
     if previous is None or rank[status] > rank[previous]:
@@ -53,6 +61,6 @@ def pytest_sessionfinish(session, exitstatus):
         if paths:
             imports[name] = paths
     Path(os.environ['PR_CONTROL_REPORT']).write_text(json.dumps({
-        'tests': _records, 'collection_errors': _collection_errors,
+        'tests': _records, 'failure_details': _failure_details, 'collection_errors': _collection_errors,
         'imports': imports, 'exitstatus': int(exitstatus),
     }))
