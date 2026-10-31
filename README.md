@@ -115,6 +115,15 @@ does not sandbox anything. Run it in a disposable VM or container with no
 tokens, credentials, SSH keys, or secrets, and never on a CI runner that
 holds privileged credentials.
 
+## unittest lifecycle failures
+
+Assertions from standard `unittest` setup, teardown or cleanup are execution
+errors, not fix evidence, even when pytest reports them in its call phase.
+The same rule covers `IsolatedAsyncioTestCase` lifecycle methods. Test-body
+assertions still count as ordinary negative controls. Classification uses the
+standard unittest lifecycle traceback frames; custom runners that remove or
+rewrite tracebacks can hide this distinction. Always inspect failure evidence.
+
 ## Limitations
 
 - Python/pytest only.

@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import traceback
 import pytest
 from pathlib import Path
 
@@ -19,7 +20,14 @@ def pytest_runtest_makereport(item, call):
     # unexpected exceptions as execution errors. pytest.fail.Exception also
     # covers explicit pytest.fail and a missing pytest.raises exception.
     if report.when == "call" and report.failed and call.excinfo is not None:
-        report.pr_control_execution_error = not call.excinfo.errisinstance((AssertionError, pytest.fail.Exception))
+        lifecycle_failure = any(
+            frame.f_globals.get("__name__") in {"unittest.case", "unittest.async_case"}
+            and frame.f_code.co_name in {"_callSetUp", "_callTearDown", "_callCleanup"}
+            for frame, _ in traceback.walk_tb(call.excinfo.tb)
+        )
+        report.pr_control_execution_error = lifecycle_failure or not call.excinfo.errisinstance(
+            (AssertionError, pytest.fail.Exception)
+        )
 
 
 
