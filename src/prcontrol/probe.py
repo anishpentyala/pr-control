@@ -16,9 +16,10 @@ def pytest_runtest_makereport(item, call):
     report = outcome.get_result()
     # unittest setUp/tearDown run inside pytest's call phase. An unexpected
     # exception there is not a regression assertion. Conservatively classify
-    # non-AssertionError failures as execution errors, including native tests.
+    # unexpected exceptions as execution errors. pytest.fail.Exception also
+    # covers explicit pytest.fail and a missing pytest.raises exception.
     if report.when == "call" and report.failed and call.excinfo is not None:
-        report.pr_control_execution_error = not call.excinfo.errisinstance(AssertionError)
+        report.pr_control_execution_error = not call.excinfo.errisinstance((AssertionError, pytest.fail.Exception))
 
 
 
