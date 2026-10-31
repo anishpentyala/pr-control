@@ -337,3 +337,70 @@ def test_explicit_pytest_fail_is_negative_control(make_repo):
     assert proc.returncode == 0, proc.stderr
     report = json.loads((repo / "r.json").read_text())
     assert report["summary"].get("fix_confirmed") == 1
+
+
+def test_unittest_setup_assertion_never_confirms_fix(make_repo):
+    test = ('import unittest\nimport calc\nclass TestCalc(unittest.TestCase):\n'
+            '    def setUp(self):\n        self.assertEqual(calc.add(2,3),5)\n'
+            '    def test_x(self):\n        self.assertTrue(True)\n')
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'test_calc.py': test})
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode == 1
+    assert data['verdicts'][0]['verdict'] == 'unrunnable'
+    assert not data['suite_diff']['complete']
+
+
+def test_unittest_teardown_assertion_never_confirms_fix(make_repo):
+    test = ('import unittest\nimport calc\nclass TestCalc(unittest.TestCase):\n'
+            '    def tearDown(self):\n        self.assertEqual(calc.add(2,3),5)\n'
+            '    def test_x(self):\n        self.assertTrue(True)\n')
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'test_calc.py': test})
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode == 1
+    assert data['verdicts'][0]['verdict'] == 'unrunnable'
+    assert not data['suite_diff']['complete']
+
+
+def test_unittest_cleanup_assertion_never_confirms_fix(make_repo):
+    test = ('import unittest\nimport calc\nclass TestCalc(unittest.TestCase):\n'
+            '    def test_x(self):\n        self.addCleanup(self.assertEqual,calc.add(2,3),5)\n')
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'test_calc.py': test})
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode == 1
+    assert data['verdicts'][0]['verdict'] == 'unrunnable'
+    assert not data['suite_diff']['complete']
+
+
+def test_unittest_body_assertion_remains_negative_control(make_repo):
+    test = ('import unittest\nimport calc\nclass TestCalc(unittest.TestCase):\n'
+            '    def test_x(self):\n        self.assertEqual(calc.add(2,3),5)\n')
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'test_calc.py': test})
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode == 0
+    assert data['summary']['fix_confirmed'] == 1
+
+
+def test_async_unittest_setup_assertion_never_confirms_fix(make_repo):
+    test = ('import unittest\nimport calc\nclass TestCalc(unittest.IsolatedAsyncioTestCase):\n'
+            '    async def asyncSetUp(self):\n        self.assertEqual(calc.add(2,3),5)\n'
+            '    async def test_x(self):\n        self.assertTrue(True)\n')
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'test_calc.py': test})
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode == 1
+    assert data['verdicts'][0]['verdict'] == 'unrunnable'
+
+
+def test_async_unittest_teardown_assertion_never_confirms_fix(make_repo):
+    test = ('import unittest\nimport calc\nclass TestCalc(unittest.IsolatedAsyncioTestCase):\n'
+            '    async def asyncTearDown(self):\n        self.assertEqual(calc.add(2,3),5)\n'
+            '    async def test_x(self):\n        self.assertTrue(True)\n')
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'test_calc.py': test})
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode == 1
+    assert data['verdicts'][0]['verdict'] == 'unrunnable'
