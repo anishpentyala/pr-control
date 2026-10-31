@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.md_out and not args.json_out:
             sys.stdout.write(md)
 
-        if any(r.collection_error or any(o.outcome == "error" for o in r.outcomes) for r in (base_run, head_run)):
+        if not payload["suite_diff"]["complete"]:
             return 1
         if args.fail_on == "regression" and payload["suite_diff"]["new_failures_on_head"]:
             return 2
