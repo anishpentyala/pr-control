@@ -214,3 +214,19 @@ def test_nonpositive_timeout_rejected(make_repo):
 def test_empty_target_list_rejected(make_repo):
     repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'tests/test_calc.py': FIX_TEST})
     assert run_cli(repo, base, head, '--targets').returncode == 1
+
+
+def test_timeout_stops_child_processes(make_repo, tmp_path):
+    import os
+    import time
+    import pytest
+    if os.name != 'posix':
+        pytest.skip('POSIX process-group cleanup')
+    sentinel = tmp_path / 'child-survived'
+    child = f'from pathlib import Path; import time; time.sleep(2); Path({str(sentinel)!r}).write_text("bad")'
+    test = f'import subprocess,sys,time\ndef test_spawn():\n    subprocess.Popen([sys.executable,"-c",{child!r}])\n    time.sleep(10)\n'
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'tests/test_calc.py': test})
+    proc = run_cli(repo, base, head, '--timeout', '1')
+    assert proc.returncode == 1
+    time.sleep(2)
+    assert not sentinel.exists()
