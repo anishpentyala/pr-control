@@ -294,3 +294,22 @@ def test_unexpected_exception_traceback_explains_unrunnable(make_repo):
     assert row['verdict'] == 'unrunnable'
     assert 'synthetic dependency mismatch' in row['base_failure_details'][0]['traceback']
     assert row['base_failure_details'][0]['classification'] == 'error'
+
+
+def test_conditional_collection_missing_on_head_fails_closed(make_repo):
+    test = 'from calc import add\nif add(2,3) != 5:\n    def test_only_on_base():\n        assert True\nelse:\n    def test_only_on_head():\n        assert True\n'
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'test_calc.py': test})
+    proc = run_cli(repo, base, head, '--fail-on', 'regression', '--json-out', str(repo / 'r.json'))
+    assert proc.returncode == 1
+    data = json.loads((repo / 'r.json').read_text())
+    assert not data['suite_diff']['complete']
+
+
+def test_setup_error_marks_suite_incomplete(make_repo):
+    test = 'import pytest\n@pytest.fixture(autouse=True)\ndef setup():\n    raise RuntimeError("cannot prepare fixture")\ndef test_x():\n    assert True\n'
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'test_calc.py': test})
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    assert proc.returncode == 1
+    data = json.loads((repo / 'r.json').read_text())
+    assert not data['suite_diff']['complete']
+    assert data['suite_diff']['execution_errors']['base'] == ['test_calc.py::test_x']
