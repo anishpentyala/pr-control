@@ -100,7 +100,8 @@ def _package_names(worktree: Path) -> set[str]:
         if not root.is_dir():
             continue
         for entry in root.iterdir():
-            if entry.name in {"tests", "test", "conftest.py", "setup.py"} or entry.name.startswith("."):
+            if (entry.name in {"tests", "test", "conftest.py", "setup.py"}
+                    or entry.name.startswith((".", "test_")) or entry.name.endswith("_test.py")):
                 continue
             if entry.is_file() and entry.suffix == ".py":
                 names.add(entry.stem)
