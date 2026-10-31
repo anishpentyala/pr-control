@@ -162,7 +162,7 @@ def test_timeout_is_environment_error(make_repo):
         'tests/test_calc.py': 'import time\ndef test_slow():\n    time.sleep(10)\n'})
     proc = run_cli(repo, base, head, '--timeout', '1')
     assert proc.returncode == 1
-    assert 'timed out' in proc.stderr
+    assert 'timed out' in proc.stdout
 
 
 def test_node_selector_supported(make_repo):
@@ -230,3 +230,12 @@ def test_timeout_stops_child_processes(make_repo, tmp_path):
     assert proc.returncode == 1
     time.sleep(2)
     assert not sentinel.exists()
+
+
+def test_root_level_tests_are_not_production_sources(make_repo):
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'test_calc.py': FIX_TEST})
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    data = json.loads((repo / 'r.json').read_text())
+    assert data['summary']['fix_confirmed'] == 1
+    assert 'test_calc' not in data['runs']['base']['imports']
