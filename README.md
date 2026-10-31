@@ -115,6 +115,15 @@ does not sandbox anything. Run it in a disposable VM or container with no
 tokens, credentials, SSH keys, or secrets, and never on a CI runner that
 holds privileged credentials.
 
+## Strict XPASS is not a negative control
+
+A pytest strict XPASS means the test body passed but an obsolete expected-failure
+mark made its report fail. pr-control classifies call-phase failures without an
+underlying exception as execution errors, not `fix_confirmed` or
+`regression_introduced`. The suite is incomplete and the CLI exits 1. An inactive
+xfail mark still allows a genuine assertion failure to serve as a control.
+Ordinary expected failures remain skipped, not proof of a fix.
+
 ## unittest lifecycle failures
 
 Assertions from standard `unittest` setup, teardown or cleanup are execution
