@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import signal
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -134,15 +135,26 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
         cmd = [sys.executable, "-m", "pytest", *abs_targets, "-q", "-p", "pr_control_probe",
                "-p", "no:cacheprovider", "--rootdir", str(test_worktree), "--import-mode", import_mode]
         try:
-            proc = subprocess.run(cmd, cwd=code_worktree, env=env, capture_output=True,
-                                  text=True, timeout=timeout)
+            proc = subprocess.Popen(cmd, cwd=code_worktree, env=env, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True, start_new_session=os.name == "posix")
+            stdout, stderr = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
+            # Stop ordinary child processes as well as pytest. This is cleanup,
+            # not containment: hostile code can still detach from the group.
+            if os.name == "posix":
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            else:
+                proc.kill()
+            proc.communicate()
             return RunResult(ref=ref_name, returncode=-1, collection_error=f"pytest timed out after {timeout}s")
         try:
             data = json.loads(report.read_text())
         except (OSError, ValueError):
             return RunResult(ref=ref_name, returncode=proc.returncode,
-                             collection_error="pytest produced no valid report: " + (proc.stderr or proc.stdout)[-500:])
+                             collection_error="pytest produced no valid report: " + (stderr or stdout)[-500:])
         outcomes = []
         for nodeid, phases in data['tests'].items():
             # Setup/teardown errors must never count as a failing assertion.
@@ -152,7 +164,7 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
         errors = data['collection_errors']
         collection_error = json.dumps(errors) if errors else None
         if proc.returncode not in (0, 1):
-            collection_error = collection_error or f"pytest exited {proc.returncode}: " + (proc.stderr or proc.stdout)[-500:]
+            collection_error = collection_error or f"pytest exited {proc.returncode}: " + (stderr or stdout)[-500:]
         if not outcomes:
             collection_error = collection_error or "no test outcomes recorded"
         imports = data['imports']
