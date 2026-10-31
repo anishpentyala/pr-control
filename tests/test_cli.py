@@ -1,3 +1,4 @@
+import pytest
 import json
 import subprocess
 import sys
@@ -404,3 +405,45 @@ def test_async_unittest_teardown_assertion_never_confirms_fix(make_repo):
     data = json.loads((repo / 'r.json').read_text())
     assert proc.returncode == 1
     assert data['verdicts'][0]['verdict'] == 'unrunnable'
+
+
+@pytest.mark.parametrize("base_marked", [True, False])
+def test_strict_xpass_never_confirms_a_fix_or_regression(make_repo, base_marked):
+    test = ('import pytest, calc\n'
+            '@pytest.mark.xfail(calc.marked, strict=True, reason="legacy condition")\n'
+            'def test_add():\n    assert calc.add(2,3)==5\n')
+    repo, base, head = make_repo(
+        {'calc.py': FIXED_CALC + f'\nmarked = {base_marked}\n'},
+        {'calc.py': FIXED_CALC + f'\nmarked = {not base_marked}\n', 'tests/test_calc.py': test},
+    )
+    proc = run_cli(repo, base, head, '--fail-on', 'no-control', '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode == 1
+    assert data['summary'] == {'unrunnable': 1}
+    assert not data['suite_diff']['complete']
+    details = data['verdicts'][0]['base_failure_details' if base_marked else 'head_failure_details']
+    assert details[0]['classification'] == 'error'
+    assert 'XPASS(strict)' in details[0]['traceback']
+
+
+def test_xfail_condition_false_keeps_real_assertion_control(make_repo):
+    test = ('import pytest, calc\n@pytest.mark.xfail(False, strict=True, reason="inactive")\n'
+            'def test_add():\n    assert calc.add(2,3)==5\n')
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'tests/test_calc.py': test})
+    proc = run_cli(repo, base, head, '--fail-on', 'no-control', '--json-out', str(repo / 'r.json'))
+    assert proc.returncode == 0
+    assert json.loads((repo / 'r.json').read_text())['summary'] == {'fix_confirmed': 1}
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_expected_xfail_is_not_assertion_failure_evidence(make_repo, strict):
+    test = ('import pytest, calc\n'
+            f'@pytest.mark.xfail(calc.marked, strict={strict}, reason="known bug")\n'
+            'def test_add():\n    assert calc.add(2,3)==5\n')
+    repo, base, head = make_repo(
+        {'calc.py': BUGGY_CALC + '\nmarked = True\n'},
+        {'calc.py': FIXED_CALC + '\nmarked = False\n', 'tests/test_calc.py': test},
+    )
+    proc = run_cli(repo, base, head, '--fail-on', 'no-control', '--json-out', str(repo / 'r.json'))
+    assert proc.returncode == 2
+    assert json.loads((repo / 'r.json').read_text())['summary'].get('fix_confirmed', 0) == 0
