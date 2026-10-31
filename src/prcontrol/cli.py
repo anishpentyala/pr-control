@@ -40,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=int, default=600, help="pytest timeout per ref in seconds (default 600)")
     p.add_argument(
         "--import-mode", choices=["importlib", "prepend", "append"], default="importlib",
-        help="pytest import mode. importlib (default) keeps the control airtight on flat-layout repos; "
+        help="pytest import mode. importlib (default) avoids common test-path shadowing; "
         "use prepend only if the suite requires it.",
     )
     p.add_argument("--json-out", type=Path, default=None, help="write the JSON report here")
@@ -80,11 +80,6 @@ def main(argv: list[str] | None = None) -> int:
         # test changes. On base: head's tests against base's code (the control).
         base_run = run_pytest(base_wt, head_wt, "base", targets, args.timeout, args.import_mode)
         head_run = run_pytest(head_wt, head_wt, "head", targets, args.timeout, args.import_mode)
-        if base_run.collection_error and head_run.collection_error:
-            raise PrControlError(
-                f"pytest could not collect the targets on either ref: {head_run.collection_error}"
-            )
-
         rows = verdicts(base_run, head_run)
         summary = Counter(r["verdict"] for r in rows)
         payload = {
