@@ -2,15 +2,28 @@
 import json
 import os
 import sys
+import pytest
 from pathlib import Path
 
 _records = {}
 _collection_errors = []
 
 
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    # unittest setUp/tearDown run inside pytest's call phase. An unexpected
+    # exception there is not a regression assertion. Conservatively classify
+    # non-AssertionError failures as execution errors, including native tests.
+    if report.when == "call" and report.failed and call.excinfo is not None:
+        report.pr_control_execution_error = not call.excinfo.errisinstance(AssertionError)
+
+
+
 def pytest_runtest_logreport(report):
     row = _records.setdefault(report.nodeid, {})
-    row[report.when] = report.outcome
+    row[report.when] = "error" if getattr(report, "pr_control_execution_error", False) else report.outcome
 
 
 def pytest_collectreport(report):
