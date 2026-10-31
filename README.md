@@ -1,0 +1,121 @@
+# pr-control
+
+A negative control for pull requests.
+
+Code review answers "does this change look right?" pr-control answers a
+stricter question: **do the PR's own tests fail on base and pass on head?** It
+runs the head ref's tests twice - once against the base ref's code, once
+against the head ref's code - and reports the observed outcome transition.
+
+## Why
+
+A fix PR usually adds a test that passes on the PR branch. That alone proves
+nothing: a test that also passes on the base ref is toothless as evidence of a
+fix. The evidence is the *difference*: fails on base, passes on head. Doing
+that by hand for every PR is tedious, so reviews skip it and useful evidence is missed.
+
+The two closest tools I compared against answer different questions:
+
+- **pr-witness** runs the base commit's tests against PR code (old tests vs
+  new code) and flags withdrawn claims.
+- **diffproof** runs mutation testing on the diff (JS/TS).
+- **pr-control** runs the PR's *new and changed* tests against *both* refs
+  (Python/pytest), and diffs the same-suite results between them.
+
+## Install
+
+```bash
+pip install .
+```
+
+## Usage
+
+```bash
+cd /path/to/clone
+pr-control . --base <base-sha> --head <head-sha>
+```
+
+With no `--targets`, pr-control runs the test files the PR changed
+(`git diff --name-only base...head`). To check a fixed suite instead:
+
+```bash
+pr-control . --base main --head feature --targets tests/test_utils.py
+```
+
+Both refs run the **head version** of the tests; only the code under test
+changes. The base run is the negative control: the package resolves from a
+worktree of the base ref (via `PYTHONPATH`, cwd, and pytest's
+`--import-mode=importlib`, which stops pytest from prepending the head tree to
+`sys.path`). No project dependencies are installed by the verification command; refs run in
+temporary `git worktree`s that are removed afterwards.
+
+## Verdicts
+
+Per changed test:
+
+| verdict | base | head | meaning |
+| --- | --- | --- | --- |
+| `fix_confirmed` | failed | passed | evidence the test binds to the change *in this environment*: it fails on base and passes on head. Not proof the fix is correct in general |
+| `passes_both` | passed | passed | toothless as a fix control (fine as coverage) |
+| `regression_introduced` | passed | failed | the PR breaks it |
+| `fails_both` | failed | failed | fix incomplete, or the test is broken |
+| `inconclusive` | varies | varies | collection, dependency or import-provenance check failed |
+| `unrunnable` | error | varies | setup/teardown failed; not evidence of a fix |
+| `transition_unverified_source` | failed | passed | outcome changed, but local-package source origin was not observed |
+| `missing_on_head` | - | - | test collected on base but not head |
+
+Plus a same-suite diff: failures that appeared on head, and failures that
+disappeared. An incomplete run is labeled and exits 1; it cannot confirm a fix.
+
+## Output
+
+Markdown to stdout by default; `--json-out report.json` and
+`--md-out report.md` write files. Every report carries the environment
+fingerprint (python/pytest/platform) and the exact refs.
+
+Exit codes: `0` ran clean, `1` input/environment error (same commit, missing
+ref, nothing to run), `2` with `--fail-on regression` (new failures on head)
+or `--fail-on no-control` (no test shows `fix_confirmed`).
+
+## Requirements
+
+- Python >= 3.9, pytest (run pr-control with the interpreter whose
+  environment can run the repo's tests)
+- git with worktree support
+
+## Security
+
+**Running a PR's tests executes that PR's code on your machine.** Untrusted
+test code can read files, make network calls, or try to escape - pr-control
+does not sandbox anything. Run it in a disposable VM or container with no
+tokens, credentials, SSH keys, or secrets, and never on a CI runner that
+holds privileged credentials.
+
+## Limitations
+
+- Python/pytest only.
+- Both runs share one interpreter environment (the one you invoke pr-control
+  with); only the repository source differs between refs. If base and head
+  need different dependency versions, the mismatch shows up in the outcomes
+  as-is - pr-control reports it (per-ref `collection_errors` and
+  `inconclusive` verdicts) rather than hiding it, but it does not
+  manage environments.
+- Isolation is limited to the source tree: temporary git worktrees mean your
+  checkout source files are not edited. Git worktree metadata is temporarily
+  changed. Worktrees do not contain test side effects - see Security.
+- The default importlib mode avoids common path-shadowing mistakes. The
+  report records loaded local-package file paths and rejects observed
+  imports from the wrong worktree. This is diagnostic evidence, not
+  tamper-proof attestation: tests can change paths or falsify reports.
+  Native extensions, editable installs, namespace packages and custom import
+  hooks may need manual inspection. A failure-to-pass transition without
+  observed local-package imports is `transition_unverified_source`, never
+  `fix_confirmed`.
+- Environment-dependent failures (GPUs, network, optional deps) show up as
+  they are; pr-control reports outcomes, it does not judge them.
+- `fix_confirmed` is per-test evidence in one environment, not a global
+  verdict on the PR.
+
+## License
+
+MIT. Built with AI assistance. Tests cover documented scenarios, not all possible environments.
