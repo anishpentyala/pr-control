@@ -113,6 +113,11 @@ holds privileged credentials.
   `fix_confirmed`.
 - Environment-dependent failures (GPUs, network, optional deps) show up as
   they are; pr-control reports outcomes, it does not judge them.
+- Unexpected call exceptions (including unittest setup errors) are classified
+  as execution errors, not assertion failures. This is conservative: a real
+  regression that raises a non-AssertionError needs manual investigation.
+  An AssertionError inside unittest setup cannot be separated from its test
+  body by this diagnostic; inspect the failure before drawing conclusions.
 - `fix_confirmed` is per-test evidence in one environment, not a global
   verdict on the PR.
 
