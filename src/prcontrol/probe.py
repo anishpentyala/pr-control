@@ -19,7 +19,12 @@ def pytest_runtest_makereport(item, call):
     # exception there is not a regression assertion. Conservatively classify
     # unexpected exceptions as execution errors. pytest.fail.Exception also
     # covers explicit pytest.fail and a missing pytest.raises exception.
-    if report.when == "call" and report.failed and call.excinfo is not None:
+    if report.when == "call" and report.failed and call.excinfo is None:
+        # A strict XPASS is a failed report even though the test body passed.
+        # Other report-only failures also lack assertion evidence. Never count
+        # these as a failing regression assertion in the negative control.
+        report.pr_control_execution_error = True
+    elif report.when == "call" and report.failed:
         lifecycle_failure = any(
             frame.f_globals.get("__name__") in {"unittest.case", "unittest.async_case"}
             and frame.f_code.co_name in {"_callSetUp", "_callTearDown", "_callCleanup"}
