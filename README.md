@@ -83,7 +83,7 @@ Per changed test:
 | `missing_on_head` | - | - | test collected on base but not head |
 
 Plus a same-suite diff: failures that appeared on head, and failures that
-disappeared. An incomplete run, execution error or different collected test set is labeled
+disappeared. A nonzero pytest session exit without recorded failures, or a zero exit despite recorded failures, is incomplete. An incomplete run, execution error or different collected test set is labeled
 and exits 1 even with `--fail-on never`. Same-suite completeness requires both
 runs to produce the same test IDs without execution errors. Per-test rows still
 show observed transitions; a complete suite is required for a successful exit.

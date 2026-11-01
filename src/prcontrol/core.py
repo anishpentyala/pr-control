@@ -165,6 +165,11 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             outcomes.append(TestOutcome(nodeid=nodeid, outcome=outcome))
         errors = data['collection_errors']
         collection_error = json.dumps(errors) if errors else None
+        has_failure = any(o.outcome in {"failed", "error"} for o in outcomes)
+        if proc.returncode == 1 and not has_failure and not collection_error:
+            collection_error = "pytest exited 1 without a recorded test failure; session result is incomplete"
+        elif proc.returncode == 0 and (has_failure or collection_error):
+            collection_error = "pytest exited 0 despite recorded failures: " + (collection_error or "test failures")
         if proc.returncode not in (0, 1):
             collection_error = collection_error or f"pytest exited {proc.returncode}: " + (stderr or stdout)[-500:]
         if not outcomes:
