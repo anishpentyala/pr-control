@@ -19,6 +19,7 @@ import sys
 import tempfile
 import signal
 from dataclasses import dataclass, field
+from collections import Counter
 from pathlib import Path
 
 TEST_PATH_RE = re.compile(r"(^|/)(tests?|spec)/.*\.(py|js|ts)$|(^|/)test_.*\.py$|.*(_test|\.test|\.spec)\.(py|js|ts)$")
@@ -165,6 +166,14 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             outcomes.append(TestOutcome(nodeid=nodeid, outcome=outcome))
         errors = data['collection_errors']
         collection_error = json.dumps(errors) if errors else None
+        collected = Counter(data['collected'])
+        finished = Counter(data['finished'])
+        if collected != finished:
+            missing = dict(collected - finished)
+            extra = dict(finished - collected)
+            collection_error = (collection_error or '') + (
+                'not all collected tests ran: ' + json.dumps({'missing': missing, 'unexpected': extra})
+            )
         has_failure = any(o.outcome in {"failed", "error"} for o in outcomes)
         if proc.returncode == 1 and not has_failure and not collection_error:
             collection_error = "pytest exited 1 without a recorded test failure; session result is incomplete"
