@@ -162,6 +162,8 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
         for nodeid, phases in data['tests'].items():
             # Setup/teardown errors must never count as a failing assertion.
             outcome = ('error' if phases.get('setup') == 'failed' or phases.get('teardown') == 'failed'
+                       else 'error' if 'error' in phases.values()
+                       else 'skipped' if 'skipped' in phases.values()
                        else phases.get('call', 'skipped'))
             outcomes.append(TestOutcome(nodeid=nodeid, outcome=outcome))
         errors = data['collection_errors']
