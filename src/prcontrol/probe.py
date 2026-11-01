@@ -9,6 +9,8 @@ from pathlib import Path
 _records = {}
 _collection_errors = []
 _failure_details = {}
+_collected = []
+_finished = []
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -57,6 +59,16 @@ def pytest_runtest_logreport(report):
         row[report.when] = status
 
 
+def pytest_collection_finish(session):
+    # session.items contains the selected tests after deselection. Record each
+    # occurrence: duplicate targets can legitimately run one node twice.
+    _collected.extend(item.nodeid for item in session.items)
+
+
+def pytest_runtest_logfinish(nodeid, location):
+    _finished.append(nodeid)
+
+
 def pytest_collectreport(report):
     if report.failed:
         _collection_errors.append({"nodeid": report.nodeid, "error": str(report.longrepr)[-2000:]})
@@ -77,4 +89,5 @@ def pytest_sessionfinish(session, exitstatus):
     Path(os.environ['PR_CONTROL_REPORT']).write_text(json.dumps({
         'tests': _records, 'failure_details': _failure_details, 'collection_errors': _collection_errors,
         'imports': imports, 'exitstatus': int(exitstatus),
+        'collected': _collected, 'finished': _finished,
     }))
