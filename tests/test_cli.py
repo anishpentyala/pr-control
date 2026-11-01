@@ -447,3 +447,31 @@ def test_expected_xfail_is_not_assertion_failure_evidence(make_repo, strict):
     proc = run_cli(repo, base, head, '--fail-on', 'no-control', '--json-out', str(repo / 'r.json'))
     assert proc.returncode == 2
     assert json.loads((repo / 'r.json').read_text())['summary'].get('fix_confirmed', 0) == 0
+
+
+def test_nonzero_session_exit_without_failed_test_is_incomplete(make_repo):
+    test = 'from calc import add\ndef test_add():\n    assert add(2,3)==5\n'
+    plugin = 'def pytest_sessionfinish(session, exitstatus):\n    session.exitstatus = 1\n'
+    repo, base, head = make_repo(
+        {'calc.py': FIXED_CALC},
+        {'calc.py': FIXED_CALC + '\n', 'tests/test_calc.py': test, 'conftest.py': plugin},
+    )
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode == 1
+    assert not data['suite_diff']['complete']
+    assert data['collection_errors']
+
+
+def test_forced_zero_session_exit_cannot_confirm_fix(make_repo):
+    plugin = 'def pytest_sessionfinish(session, exitstatus):\n    session.exitstatus = 0\n'
+    repo, base, head = make_repo(
+        {'calc.py': BUGGY_CALC},
+        {'calc.py': FIXED_CALC, 'tests/test_calc.py': FIX_TEST, 'conftest.py': plugin},
+    )
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode == 1
+    assert not data['suite_diff']['complete']
+    assert data['summary'] == {'inconclusive': 1}
+    assert 'exited 0 despite recorded failures' in data['collection_errors']['base']
