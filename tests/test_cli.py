@@ -525,3 +525,46 @@ def test_duplicate_target_occurrences_are_complete_when_all_finish(make_repo):
     assert proc.returncode == 0
     assert data['suite_diff']['complete']
     assert data['summary'] == {'fix_confirmed': 1}
+
+
+@pytest.mark.parametrize('skip_side', ['base', 'head', 'both'])
+def test_teardown_skip_cannot_confirm_a_fix(make_repo, skip_side):
+    test = ('import pytest, calc\n@pytest.fixture(autouse=True)\ndef cleanup():\n'
+            '    yield\n    if calc.skip_cleanup:\n        pytest.skip("cleanup unavailable")\n'
+            'def test_add():\n    assert calc.add(2,3)==5\n')
+    repo, base, head = make_repo(
+        {'calc.py': BUGGY_CALC + f'\nskip_cleanup = {skip_side in ("base", "both")}\n'},
+        {'calc.py': FIXED_CALC + f'\nskip_cleanup = {skip_side in ("head", "both")}\n',
+         'tests/test_calc.py': test},
+    )
+    proc = run_cli(repo, base, head, '--fail-on', 'no-control', '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode != 0
+    assert not data['summary'].get('fix_confirmed', 0)
+    skipped_ref = 'head' if skip_side == 'head' else 'base'
+    assert data['verdicts'][0][skipped_ref] == 'skipped'
+
+
+def test_teardown_skip_does_not_become_passing_coverage(make_repo):
+    test = ('import pytest, calc\n@pytest.fixture(autouse=True)\ndef cleanup():\n'
+            '    yield\n    pytest.skip("cleanup unavailable")\n'
+            'def test_add():\n    assert calc.add(2,3)==5\n')
+    repo, base, head = make_repo({'calc.py': FIXED_CALC},
+        {'calc.py': FIXED_CALC+'\n', 'tests/test_calc.py': test})
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert data['summary'].get('passes_both', 0) == 0
+    assert all(data['verdicts'][0][side] == 'skipped' for side in ('base', 'head'))
+
+
+def test_execution_error_still_outweighs_teardown_skip(make_repo):
+    test = ('import pytest, calc\n@pytest.fixture(autouse=True)\ndef cleanup():\n'
+            '    yield\n    pytest.skip("cleanup unavailable")\n'
+            'def test_add():\n    raise RuntimeError("execution failed")\n')
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC},
+        {'calc.py': FIXED_CALC, 'tests/test_calc.py': test})
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode == 1
+    assert data['summary'] == {'unrunnable': 1}
+    assert all(data['verdicts'][0][side] == 'error' for side in ('base', 'head'))
