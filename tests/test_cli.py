@@ -475,3 +475,53 @@ def test_forced_zero_session_exit_cannot_confirm_fix(make_repo):
     assert not data['suite_diff']['complete']
     assert data['summary'] == {'inconclusive': 1}
     assert 'exited 0 despite recorded failures' in data['collection_errors']['base']
+
+
+@pytest.mark.parametrize('stop_option', ['-x', '--maxfail=1'])
+def test_matching_early_stops_do_not_make_complete_suite(make_repo, monkeypatch, stop_option):
+    test = ('import calc\n'
+            'def test_00_existing_failure():\n    assert calc.add(2,3)==99\n'
+            'def test_01_fix_witness():\n    assert calc.add(2,3)==5\n')
+    repo, base, head = make_repo(
+        {'calc.py': BUGGY_CALC},
+        {'calc.py': FIXED_CALC, 'tests/test_calc.py': test},
+    )
+    monkeypatch.setenv('PYTEST_ADDOPTS', stop_option)
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode == 1
+    assert not data['suite_diff']['complete']
+    assert 'not all collected tests ran' in data['collection_errors']['base']
+    assert 'not all collected tests ran' in data['collection_errors']['head']
+    assert data['summary'] == {'inconclusive': 1}
+
+
+def test_deselected_tests_do_not_make_suite_incomplete(make_repo, monkeypatch):
+    test = (FIX_TEST + '\ndef test_unselected():\n    assert False\n')
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'tests/test_calc.py': test})
+    monkeypatch.setenv('PYTEST_ADDOPTS', '-k test_add')
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode == 0
+    assert data['suite_diff']['complete']
+    assert data['summary'] == {'fix_confirmed': 1}
+
+
+def test_all_tests_finished_at_maxfail_boundary_is_complete(make_repo, monkeypatch):
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'tests/test_calc.py': FIX_TEST})
+    monkeypatch.setenv('PYTEST_ADDOPTS', '--maxfail=1')
+    proc = run_cli(repo, base, head, '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode == 0
+    assert data['suite_diff']['complete']
+    assert data['summary'] == {'fix_confirmed': 1}
+
+
+def test_duplicate_target_occurrences_are_complete_when_all_finish(make_repo):
+    repo, base, head = make_repo({'calc.py': BUGGY_CALC}, {'calc.py': FIXED_CALC, 'tests/test_calc.py': FIX_TEST})
+    proc = run_cli(repo, base, head, '--targets', 'tests/test_calc.py', 'tests/test_calc.py',
+                   '--json-out', str(repo / 'r.json'))
+    data = json.loads((repo / 'r.json').read_text())
+    assert proc.returncode == 0
+    assert data['suite_diff']['complete']
+    assert data['summary'] == {'fix_confirmed': 1}
