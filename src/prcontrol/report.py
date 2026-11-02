@@ -21,6 +21,9 @@ def render_markdown(payload: dict) -> str:
         "| test | base | head | verdict |",
         "| --- | --- | --- | --- |",
     ]
+    if payload.get("test_support"):
+        lines[6:6] = ["- explicit head test support (after selected source paths): "
+                      + ", ".join(f"`{path}`" for path in payload["test_support"]), ""]
     for row in payload["verdicts"]:
         lines.append(f"| `{row['test']}` | {row['base'] or '-'} | {row['head'] or '-'} | **{row['verdict']}** |")
     detailed = [row for row in payload["verdicts"] if row.get("base_failure_details") or row.get("head_failure_details")]
