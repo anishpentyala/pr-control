@@ -114,18 +114,28 @@ def _package_names(worktree: Path) -> set[str]:
 
 
 def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
-               targets: list[str], timeout: int, import_mode: str = "importlib") -> RunResult:
+               targets: list[str], timeout: int, import_mode: str = "importlib",
+               test_support: list[str] | None = None) -> RunResult:
     """Run head tests against selected source and inspect imported file origins.
 
     Tests and plugins can override imports or falsify reports. This is a
     diagnostic for trusted code, never a sandbox or adversarial attestation.
     """
+    support_dirs = []
+    for path in test_support or []:
+        resolved = (test_worktree / path).resolve()
+        if not resolved.is_relative_to(test_worktree.resolve()):
+            raise PrControlError("test support must stay inside the head repository")
+        if not resolved.is_dir():
+            raise PrControlError(f"test support directory does not exist on head: {path}")
+        support_dirs.append(str(resolved))
     packages = _package_names(code_worktree) | _package_names(test_worktree)
     with tempfile.TemporaryDirectory(prefix="pr-control-probe-") as tmp:
         probe_dir = Path(tmp)
         shutil.copyfile(Path(__file__).with_name("probe.py"), probe_dir / "pr_control_probe.py")
         report = probe_dir / "report.json"
-        env = dict(os.environ, PYTHONPATH=str(probe_dir) + os.pathsep + _pythonpath_for(code_worktree))
+        env = dict(os.environ, PYTHONPATH=os.pathsep.join(
+            [str(probe_dir), _pythonpath_for(code_worktree), *support_dirs]))
         env.update(PR_CONTROL_REPORT=str(report), PR_CONTROL_PACKAGES=json.dumps(sorted(packages)))
         abs_targets = []
         for target in targets:
