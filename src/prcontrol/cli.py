@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
             "base": base_sha,
             "head": head_sha,
             "targets": targets,
-            "runs": {r.ref: {"returncode": r.returncode, "imports": r.imports, "source_verified": r.source_verified} for r in (base_run, head_run)},
+            "runs": {r.ref: {"returncode": r.returncode, "imports": r.imports, "source_verified": r.source_verified, "collected_counts": r.collected_counts} for r in (base_run, head_run)},
             "env": env_fingerprint(),
             "verdicts": rows,
             "summary": dict(summary),

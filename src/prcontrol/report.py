@@ -43,6 +43,11 @@ def render_markdown(payload: dict) -> str:
         f"- new failures on head: {len(sd['new_failures_on_head'])}",
         f"- fixed on head: {len(sd['fixed_on_head'])}",
     ]
+    if sd.get("occurrence_mismatches"):
+        lines += ["", "### Test occurrence count mismatches", "",
+                  "The selected test IDs match, but their execution counts differ; the suite is not comparable."]
+        for node, counts in sd["occurrence_mismatches"].items():
+            lines.append(f"- `{node}`: base {counts['base']}, head {counts['head']}")
     if sd["new_failures_on_head"]:
         lines += ["", "### New failures on head", ""]
         lines += [f"- `{t}`" for t in sd["new_failures_on_head"]]
