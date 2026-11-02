@@ -53,8 +53,11 @@ cd /path/to/clone
 pr-control . --base <base-sha> --head <head-sha>
 ```
 
-With no `--targets`, pr-control runs the test files the PR changed
-(`git diff --name-only base...head`). To check a fixed suite instead:
+With no `--targets`, pr-control runs Python test paths added, modified or renamed by the PR
+(the head destinations from `git diff --name-only -z --diff-filter=AMR base...head`).
+NUL-delimited discovery preserves literal Unicode, whitespace and newline names;
+deleted tests and `conftest.py` are not automatic targets. A rename is test
+selection, not proof that the test binds to the fix. To check a fixed suite instead:
 
 ```bash
 pr-control . --base main --head feature --targets tests/test_utils.py
