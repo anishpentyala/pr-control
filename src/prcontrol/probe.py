@@ -11,6 +11,9 @@ _collection_errors = []
 _failure_details = {}
 _collected = []
 _finished = []
+_worker_collections = []
+_worker_imports = {}
+_worker_errors = []
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -74,7 +77,7 @@ def pytest_collectreport(report):
         _collection_errors.append({"nodeid": report.nodeid, "error": str(report.longrepr)[-2000:]})
 
 
-def pytest_sessionfinish(session, exitstatus):
+def _observed_imports():
     candidates = set(json.loads(os.environ['PR_CONTROL_PACKAGES']))
     imports = {}
     for name, mod in list(sys.modules.items()):
@@ -86,8 +89,44 @@ def pytest_sessionfinish(session, exitstatus):
             paths = [str(Path(p).resolve()) for p in getattr(mod, '__path__', [])]
         if paths:
             imports[name] = paths
+    return imports
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_xdist_node_collection_finished(node, ids):
+    # Every worker collects the same selected suite. Do not multiply counts
+    # by the worker count: each test occurrence is scheduled exactly once.
+    _worker_collections.append(list(ids))
+    if len(_worker_collections) == 1:
+        _collected.extend(ids)
+    elif list(ids) != _worker_collections[0]:
+        _worker_errors.append("xdist workers collected different suites")
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node, error):
+    if error:
+        _worker_errors.append("xdist worker failed: " + str(error))
+    evidence = node.workeroutput.get("pr_control_evidence")
+    if not isinstance(evidence, dict):
+        _worker_errors.append("xdist worker returned no source evidence")
+        return
+    for name, paths in evidence.get("imports", {}).items():
+        _worker_imports.setdefault(name, []).extend(paths)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    imports = _observed_imports()
+    if hasattr(session.config, "workerinput"):
+        # Workers communicate through xdist, never race to replace the shared
+        # report file. The controller owns outcomes and final completeness.
+        session.config.workeroutput["pr_control_evidence"] = {"imports": imports}
+        return
+    for name, paths in _worker_imports.items():
+        imports[name] = sorted(set(imports.get(name, []) + paths))
+    errors = _collection_errors + [{"nodeid": "xdist", "error": value} for value in _worker_errors]
     Path(os.environ['PR_CONTROL_REPORT']).write_text(json.dumps({
-        'tests': _records, 'failure_details': _failure_details, 'collection_errors': _collection_errors,
+        'tests': _records, 'failure_details': _failure_details, 'collection_errors': errors,
         'imports': imports, 'exitstatus': int(exitstatus),
         'collected': _collected, 'finished': _finished,
     }))

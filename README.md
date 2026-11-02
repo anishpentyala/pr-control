@@ -98,6 +98,24 @@ own subprocess-driven tests can run with `--test-support tests`, but their
 outcome transitions stay `transition_unverified_source` rather than being
 upgraded to `fix_confirmed`.
 
+## Parallel pytest suites with xdist
+
+If the environment has `pytest-xdist`, existing `PYTEST_ADDOPTS` such as
+`-n 2 --dist load` can run the selected head tests in workers on both refs.
+The controller writes the final report; workers return their observed local
+import paths instead of racing to overwrite the shared JSON report. Worker
+collection is counted once, not once per worker. The same completeness,
+assertion classification and wrong-worktree checks still apply.
+
+The executed CPU coverage includes one/two workers, `load`, `loadscope`,
+`loadfile` and `worksteal` scheduling, duplicate node IDs, early stop, worker
+crash, collection mismatch and missing worker evidence. A crashed or incomplete
+worker run fails closed. Tests that import no local source still produce
+`transition_unverified_source`, never `fix_confirmed`. xdist is optional and
+is not installed by pr-control. Remote workers, subprocess-only imports,
+custom schedulers and plugins that rewrite reports remain outside this
+coverage. This is not a sandbox or tamper-proof worker attestation.
+
 ## Verdicts
 
 Per changed test:
