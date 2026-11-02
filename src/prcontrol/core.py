@@ -18,6 +18,8 @@ import subprocess
 import sys
 import tempfile
 import signal
+import threading
+import time
 from dataclasses import dataclass, field
 from collections import Counter
 from pathlib import Path
@@ -155,31 +157,24 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             abs_targets.append(str(resolved) + ("::" + "::".join(selectors) if selectors else ""))
         cmd = [sys.executable, "-m", "pytest", *abs_targets, "-q", "-p", "pr_control_probe",
                "-p", "no:cacheprovider", "--rootdir", str(test_worktree), "--import-mode", import_mode]
-        # Pytest may print unbounded output. Spool it to private temporary files
-        # and retain only diagnostic tails in this process, not the whole stream.
-        # This bounds verifier memory, not disk use or the tested process itself.
-        with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
-            try:
-                proc = subprocess.Popen(
-                    cmd, cwd=code_worktree, env=env, stdout=stdout_file,
-                    stderr=stderr_file, start_new_session=os.name == "posix",
-                )
-                proc.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                # Stop ordinary child processes as well as pytest. This is
-                # cleanup, not containment: hostile code can detach the group.
-                if os.name == "posix":
-                    try:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                else:
-                    proc.kill()
-                proc.wait()
-                return RunResult(ref=ref_name, returncode=-1,
-                                 collection_error=f"pytest timed out after {timeout}s")
-            stdout = _output_tail(stdout_file)
-            stderr = _output_tail(stderr_file)
+        try:
+            proc = subprocess.Popen(
+                cmd, cwd=code_worktree, env=env, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, start_new_session=os.name == "posix",
+            )
+            stdout, stderr = _capture_output(proc, timeout)
+        except subprocess.TimeoutExpired:
+            # Cleanup, not containment: hostile code can detach the group.
+            if os.name == "posix":
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            else:
+                proc.kill()
+            proc.wait()
+            return RunResult(ref=ref_name, returncode=-1,
+                             collection_error=f"pytest timed out after {timeout}s")
         try:
             data = json.loads(report.read_text())
         except (OSError, ValueError):
@@ -403,8 +398,40 @@ def check_failure_witnesses(expected: dict[str, str], rows: list[dict], base_run
     return {"passed": all(row["matched"] for row in results), "expectations": results}
 
 
-def _output_tail(stream, limit: int = 16384) -> str:
-    """A bounded diagnostic suffix; non-text and split UTF-8 replace safely."""
-    stream.seek(0, os.SEEK_END)
-    stream.seek(max(0, stream.tell() - limit))
-    return stream.read(limit).decode("utf-8", errors="replace")
+
+def _capture_output(proc, timeout: int, limit: int = 16384) -> tuple[str, str]:
+    """Drain both pipes with bounded tails; EOF is part of the timeout.
+
+    Children inheriting an output pipe must close it before completion, as
+    with communicate(). Daemon readers avoid blocking shutdown on a detached
+    process that escapes group cleanup. This is not hostile-code containment.
+    """
+    tails = [bytearray(), bytearray()]
+    errors = []
+
+    def drain(stream, tail):
+        try:
+            while True:
+                chunk = stream.read1(65536)
+                if not chunk:
+                    break
+                tail.extend(chunk)
+                del tail[:-limit]
+        except OSError as error:
+            errors.append(error)
+        finally:
+            stream.close()
+
+    readers = [threading.Thread(target=drain, args=(stream, tail), daemon=True)
+               for stream, tail in zip((proc.stdout, proc.stderr), tails)]
+    deadline = time.monotonic() + timeout
+    for reader in readers:
+        reader.start()
+    proc.wait(timeout=max(0, deadline - time.monotonic()))
+    for reader in readers:
+        reader.join(timeout=max(0, deadline - time.monotonic()))
+    if any(reader.is_alive() for reader in readers):
+        raise subprocess.TimeoutExpired(proc.args, timeout)
+    if errors:
+        raise errors[0]
+    return tuple(bytes(tail).decode("utf-8", errors="replace") for tail in tails)
