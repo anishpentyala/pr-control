@@ -35,6 +35,10 @@ def render_markdown(payload: dict) -> str:
     for row in payload["verdicts"]:
         lines.append(f"| {_inline(row['test'])} | {row['base'] or '-'} | {row['head'] or '-'} | **{row['verdict']}** |")
     for ref, run in payload.get("runs", {}).items():
+        runtime = run.get("runtime_skips", [])
+        if runtime:
+            lines += ["", f"### {ref}: skipped during execution", ""]
+            lines += [f"- {_inline(node)}" for node in runtime]
         skipped = run.get("collection_skips", [])
         if skipped:
             lines += ["", f"### {ref}: skipped during collection", ""]
