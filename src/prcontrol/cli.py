@@ -43,6 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="pytest import mode. importlib (default) avoids common test-path shadowing; "
         "use prepend only if the suite requires it.",
     )
+    p.add_argument("--test-support", action="append", default=[], metavar="DIR",
+                   help="head test-helper directory appended after selected source paths; repeatable, no automatic fallback")
     p.add_argument("--json-out", type=Path, default=None, help="write the JSON report here")
     p.add_argument("--md-out", type=Path, default=None, help="write the Markdown report here")
     p.add_argument(
@@ -78,8 +80,8 @@ def main(argv: list[str] | None = None) -> int:
 
         # Both sides run the HEAD version of the tests; only the code under
         # test changes. On base: head's tests against base's code (the control).
-        base_run = run_pytest(base_wt, head_wt, "base", targets, args.timeout, args.import_mode)
-        head_run = run_pytest(head_wt, head_wt, "head", targets, args.timeout, args.import_mode)
+        base_run = run_pytest(base_wt, head_wt, "base", targets, args.timeout, args.import_mode, args.test_support)
+        head_run = run_pytest(head_wt, head_wt, "head", targets, args.timeout, args.import_mode, args.test_support)
         rows = verdicts(base_run, head_run)
         summary = Counter(r["verdict"] for r in rows)
         payload = {
@@ -90,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
             "base": base_sha,
             "head": head_sha,
             "targets": targets,
+            "test_support": args.test_support,
             "runs": {r.ref: {"returncode": r.returncode, "imports": r.imports, "source_verified": r.source_verified, "collected_counts": r.collected_counts} for r in (base_run, head_run)},
             "env": env_fingerprint(),
             "verdicts": rows,
