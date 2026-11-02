@@ -32,6 +32,8 @@ def render_markdown(payload: dict) -> str:
     if payload.get("test_support"):
         lines[6:6] = ["- explicit head test support (after selected source paths): "
                       + ", ".join(f"{_inline(path)}" for path in payload["test_support"]), ""]
+    if payload.get("repeats", 1) > 1:
+        lines[6:6] = [f"- repeated stability check: {payload['repeats']} fresh pytest subprocesses per ref; shared worktree, no file reset", ""]
     for row in payload["verdicts"]:
         lines.append(f"| {_inline(row['test'])} | {row['base'] or '-'} | {row['head'] or '-'} | **{row['verdict']}** |")
     for ref, run in payload.get("runs", {}).items():
@@ -45,6 +47,13 @@ def render_markdown(payload: dict) -> str:
             lines += [f"- {_inline(node)}" for node in skipped]
     if payload.get("require_no_skips"):
         lines += ["", "- policy: --require-no-skips (runtime and collection skips fail the command)"]
+    if payload.get("repeats", 1) > 1:
+        lines += ["", "## Repeated attempts", "", "Every attempt is retained in JSON. Repetition detects observed instability, not all flakes."]
+        for ref, run in payload.get("runs", {}).items():
+            for attempt in run.get("attempts", []):
+                lines.append(f"- {ref} attempt {attempt['attempt']}: exit {attempt['returncode']}; source verified {attempt['source_verified']}; incomplete {bool(attempt['collection_error'])}")
+                for node in attempt.get("outcomes", []):
+                    lines.append(f"  - {_inline(node['nodeid'])}: {node['outcome']}")
     detailed = [row for row in payload["verdicts"] if row.get("base_failure_details") or row.get("head_failure_details")]
     if detailed:
         lines += ["", "## Failure evidence", "", "Inspect these failures before interpreting outcome transitions."]
