@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 import json
+import html
+
+
+def _inline(value: str) -> str:
+    """Keep literal identifiers inside one Markdown cell/heading."""
+    return "<code>" + (html.escape(str(value), quote=False).replace("`", "&#96;")
+            .replace("|", "&#124;").replace("\r", r"\r").replace("\n", r"\n")
+            .replace("\t", r"\t")) + "</code>"
 
 
 def render_json(payload: dict) -> str:
@@ -11,7 +19,7 @@ def render_json(payload: dict) -> str:
 
 def render_markdown(payload: dict) -> str:
     lines = [
-        f"# pr-control report: {payload['repo']}",
+        f"# pr-control report: {_inline(payload['repo'])}",
         "",
         f"- base `{payload['base']}` vs head `{payload['head']}`",
         f"- env: python {payload['env']['python']}, pytest {payload['env']['pytest']}, {payload['env']['platform']}",
@@ -23,14 +31,14 @@ def render_markdown(payload: dict) -> str:
     ]
     if payload.get("test_support"):
         lines[6:6] = ["- explicit head test support (after selected source paths): "
-                      + ", ".join(f"`{path}`" for path in payload["test_support"]), ""]
+                      + ", ".join(f"{_inline(path)}" for path in payload["test_support"]), ""]
     for row in payload["verdicts"]:
-        lines.append(f"| `{row['test']}` | {row['base'] or '-'} | {row['head'] or '-'} | **{row['verdict']}** |")
+        lines.append(f"| {_inline(row['test'])} | {row['base'] or '-'} | {row['head'] or '-'} | **{row['verdict']}** |")
     detailed = [row for row in payload["verdicts"] if row.get("base_failure_details") or row.get("head_failure_details")]
     if detailed:
         lines += ["", "## Failure evidence", "", "Inspect these failures before interpreting outcome transitions."]
         for row in detailed:
-            lines += ["", f"### `{row['test']}`"]
+            lines += ["", f"### {_inline(row['test'])}"]
             for ref in ("base", "head"):
                 for failure in row.get(f"{ref}_failure_details", []):
                     lines += ["", f"{ref}: {failure['phase']} / {failure['classification']}", "", "```text",
@@ -50,10 +58,10 @@ def render_markdown(payload: dict) -> str:
         lines += ["", "### Test occurrence count mismatches", "",
                   "The selected test IDs match, but their execution counts differ; the suite is not comparable."]
         for node, counts in sd["occurrence_mismatches"].items():
-            lines.append(f"- `{node}`: base {counts['base']}, head {counts['head']}")
+            lines.append(f"- {_inline(node)}: base {counts['base']}, head {counts['head']}")
     if sd["new_failures_on_head"]:
         lines += ["", "### New failures on head", ""]
-        lines += [f"- `{t}`" for t in sd["new_failures_on_head"]]
+        lines += [f"- {_inline(t)}" for t in sd["new_failures_on_head"]]
     for ref, error in payload.get("collection_errors", {}).items():
         lines += ["", f"### {ref}: incomplete run", "", "```", str(error), "```"]
     lines += ["", "## Source provenance", ""]
