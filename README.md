@@ -180,6 +180,16 @@ underlying exception as execution errors, not `fix_confirmed` or
 xfail mark still allows a genuine assertion failure to serve as a control.
 Ordinary expected failures remain skipped, not proof of a fix.
 
+For dependency-complete CI, add `--require-no-skips` to reject any selected
+test skipped on either ref, including collection-time `pytest.importorskip`
+and module-level skips. This returns 1 even if another test supplies a valid
+negative control; it is independent of `--fail-on`. Reports are still written,
+and include collection skips and the enabled policy. Without the flag, skips
+remain permitted and reported. The flag also rejects expected-failure skips,
+so use it only when the selected suite is expected to run without skips.
+With xdist, worker collection skips are aggregated once in the controller.
+
+
 ## unittest lifecycle failures
 
 Assertions from standard `unittest` setup, teardown or cleanup are execution

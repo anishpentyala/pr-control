@@ -34,6 +34,17 @@ def render_markdown(payload: dict) -> str:
                       + ", ".join(f"{_inline(path)}" for path in payload["test_support"]), ""]
     for row in payload["verdicts"]:
         lines.append(f"| {_inline(row['test'])} | {row['base'] or '-'} | {row['head'] or '-'} | **{row['verdict']}** |")
+    for ref, run in payload.get("runs", {}).items():
+        runtime = run.get("runtime_skips", [])
+        if runtime:
+            lines += ["", f"### {ref}: skipped during execution", ""]
+            lines += [f"- {_inline(node)}" for node in runtime]
+        skipped = run.get("collection_skips", [])
+        if skipped:
+            lines += ["", f"### {ref}: skipped during collection", ""]
+            lines += [f"- {_inline(node)}" for node in skipped]
+    if payload.get("require_no_skips"):
+        lines += ["", "- policy: --require-no-skips (runtime and collection skips fail the command)"]
     detailed = [row for row in payload["verdicts"] if row.get("base_failure_details") or row.get("head_failure_details")]
     if detailed:
         lines += ["", "## Failure evidence", "", "Inspect these failures before interpreting outcome transitions."]

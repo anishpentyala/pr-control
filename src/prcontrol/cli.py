@@ -45,6 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--test-support", action="append", default=[], metavar="DIR",
                    help="head test-helper directory appended after selected source paths; repeatable, no automatic fallback")
+    p.add_argument("--require-no-skips", action="store_true",
+                   help="exit 1 if either side skips a selected test; default permits and reports skips")
     p.add_argument("--json-out", type=Path, default=None, help="write the JSON report here")
     p.add_argument("--md-out", type=Path, default=None, help="write the Markdown report here")
     p.add_argument(
@@ -93,7 +95,8 @@ def main(argv: list[str] | None = None) -> int:
             "head": head_sha,
             "targets": targets,
             "test_support": args.test_support,
-            "runs": {r.ref: {"returncode": r.returncode, "imports": r.imports, "source_verified": r.source_verified, "collected_counts": r.collected_counts} for r in (base_run, head_run)},
+            "require_no_skips": args.require_no_skips,
+            "runs": {r.ref: {"returncode": r.returncode, "imports": r.imports, "source_verified": r.source_verified, "collected_counts": r.collected_counts, "collection_skips": r.collection_skips, "runtime_skips": r.runtime_skips} for r in (base_run, head_run)},
             "env": env_fingerprint(),
             "verdicts": rows,
             "summary": dict(summary),
@@ -108,6 +111,12 @@ def main(argv: list[str] | None = None) -> int:
         if not args.md_out and not args.json_out:
             sys.stdout.write(md)
 
+        has_skips = any(run.collection_skips or run.runtime_skips for run in (base_run, head_run)) or any(
+            o.outcome == "skipped" for run in (base_run, head_run) for o in run.outcomes
+        )
+        if args.require_no_skips and has_skips:
+            print("pr-control: skipped selected tests violate --require-no-skips", file=sys.stderr)
+            return 1
         if not payload["suite_diff"]["complete"]:
             return 1
         if args.fail_on == "regression" and payload["suite_diff"]["new_failures_on_head"]:
