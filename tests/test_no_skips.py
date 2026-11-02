@@ -55,3 +55,18 @@ def test_no_skips_rejects_other_skip_forms(make_repo,monkeypatch,phase,parallel)
     proc=run_cli(repo,base,head,'--require-no-skips','--fail-on','no-control')
     assert proc.returncode==1,proc.stderr
     assert '--require-no-skips' in proc.stderr
+
+@pytest.mark.parametrize('strict',[False,True])
+@pytest.mark.parametrize('parallel',[False,True])
+def test_duplicate_skip_is_not_hidden_by_later_failure(make_repo,monkeypatch,strict,parallel):
+    if parallel:
+        pytest.importorskip('xdist')
+        monkeypatch.setenv('PYTEST_ADDOPTS','-n 1')
+    repo,base,head=make_repo({'calc.py':'VALUE=0\n'},
+        {'calc.py':'VALUE=1\n','test_fix.py':'import calc\ndef test_fix():assert calc.VALUE==1\n',
+         'conftest.py':'def pytest_collection_modifyitems(items):\n items.extend([i for i in items if i.name=="test_repeat"])\n',
+         'test_repeat.py':'import pytest,calc\ndef test_repeat():\n calc.count=getattr(calc,"count",0)+1\n if calc.count==1:pytest.skip("first occurrence")\n assert False\n'})
+    proc=run_cli(repo,base,head,'--targets','test_fix.py','test_repeat.py',
+                 '--fail-on','no-control',*(['--require-no-skips'] if strict else []))
+    assert proc.returncode==(1 if strict else 0),proc.stderr
+    if strict:assert '--require-no-skips' in proc.stderr
