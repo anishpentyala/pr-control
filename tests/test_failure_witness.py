@@ -164,3 +164,25 @@ def test_message_evidence_is_bounded(make_repo,tmp_path,early):
     assert proc.returncode==(0 if early else 1),proc.stderr
     evidence=data['verdicts'][0]['base_failure_details'][0]['exception_message']
     assert len(evidence)==8000
+
+
+@pytest.mark.parametrize('policy',[False,True])
+@pytest.mark.parametrize('parallel',[False,True])
+def test_unformattable_assertion_does_not_abort_collection(make_repo,tmp_path,monkeypatch,policy,parallel):
+    if parallel:
+        pytest.importorskip('xdist')
+        monkeypatch.setenv('PYTEST_ADDOPTS','-n 2')
+    test='''import calc
+class BadAssertion(AssertionError):
+ def __str__(self):raise RuntimeError("formatting failed")
+def test_fix():
+ if calc.VALUE==0:raise BadAssertion()
+def test_other():assert calc.VALUE in (0,1)
+'''
+    repo,base,head=make_repo({'calc.py':'VALUE=0'},{'calc.py':'VALUE=1','test_fix.py':test})
+    proc,data,_=run(repo,base,head,tmp_path,{'test_fix.py::test_fix':'witness'} if policy else None)
+    assert proc.returncode==(1 if policy else 0),proc.stderr
+    assert data['summary']=={'fix_confirmed':1,'passes_both':1}
+    assert data['suite_diff']['complete']
+    assert data['verdicts'][0]['base_failure_details'][0]['exception_message'] is None
+    if policy:assert not data['base_failure_witness']['passed']
