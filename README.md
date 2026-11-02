@@ -70,6 +70,13 @@ worktree of the base ref (via `PYTHONPATH`, cwd, and pytest's
 `sys.path`). No project dependencies are installed by the verification command; refs run in
 temporary `git worktree`s that are removed afterwards.
 
+Subprocess stdout and stderr are spooled to private temporary files, not retained
+in the verifier heap. Only the last 16 KiB of each stream is read for diagnostics
+(and existing error messages show a shorter suffix). This limits parent output
+memory, not disk consumption, report size, or the tested process memory. Tests
+can inspect that their output descriptors are regular files rather than pipes.
+Temporary files close after normal runs and timeouts; this is not a sandbox.
+
 ### Shared test helpers without head-source precedence
 
 Some suites import `helpers`, `conftest`, or sibling test modules directly.
