@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
             "targets": targets,
             "test_support": args.test_support,
             "require_no_skips": args.require_no_skips,
-            "runs": {r.ref: {"returncode": r.returncode, "imports": r.imports, "source_verified": r.source_verified, "collected_counts": r.collected_counts, "collection_skips": r.collection_skips} for r in (base_run, head_run)},
+            "runs": {r.ref: {"returncode": r.returncode, "imports": r.imports, "source_verified": r.source_verified, "collected_counts": r.collected_counts, "collection_skips": r.collection_skips, "runtime_skips": r.runtime_skips} for r in (base_run, head_run)},
             "env": env_fingerprint(),
             "verdicts": rows,
             "summary": dict(summary),
@@ -111,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.md_out and not args.json_out:
             sys.stdout.write(md)
 
-        has_skips = any(run.collection_skips for run in (base_run, head_run)) or any(
+        has_skips = any(run.collection_skips or run.runtime_skips for run in (base_run, head_run)) or any(
             o.outcome == "skipped" for run in (base_run, head_run) for o in run.outcomes
         )
         if args.require_no_skips and has_skips:
