@@ -16,6 +16,7 @@ _worker_imports = {}
 _worker_errors = []
 _collection_skips = []
 _worker_skips = []
+_runtime_skips = []
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -44,6 +45,8 @@ def pytest_runtest_makereport(item, call):
 
 
 def pytest_runtest_logreport(report):
+    if report.skipped:
+        _runtime_skips.append(report.nodeid)
     row = _records.setdefault(report.nodeid, {})
     status = "error" if getattr(report, "pr_control_execution_error", False) else report.outcome
     if report.failed and hasattr(report, "context"):
@@ -135,4 +138,5 @@ def pytest_sessionfinish(session, exitstatus):
         'imports': imports, 'exitstatus': int(exitstatus),
         'collected': _collected, 'finished': _finished,
         'collection_skips': sorted(set(_collection_skips + _worker_skips)),
+        'runtime_skips': sorted(set(_runtime_skips)),
     }))
