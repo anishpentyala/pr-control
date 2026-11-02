@@ -1,138 +1,91 @@
-"""Internal pytest plugin. This is reporting, not a security boundary."""
+"""Markdown + JSON rendering for a verification result."""
+
+from __future__ import annotations
+
 import json
-import os
-import sys
-import traceback
-import pytest
-from pathlib import Path
-
-_records = {}
-_collection_errors = []
-_failure_details = {}
-_collected = []
-_finished = []
-_worker_collections = []
-_worker_imports = {}
-_worker_errors = []
-_collection_skips = []
-_worker_skips = []
+import html
 
 
-@pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_makereport(item, call):
-    outcome = yield
-    report = outcome.get_result()
-    # unittest setUp/tearDown run inside pytest's call phase. An unexpected
-    # exception there is not a regression assertion. Conservatively classify
-    # unexpected exceptions as execution errors. pytest.fail.Exception also
-    # covers explicit pytest.fail and a missing pytest.raises exception.
-    if report.when == "call" and report.failed and call.excinfo is None:
-        # A strict XPASS is a failed report even though the test body passed.
-        # Other report-only failures also lack assertion evidence. Never count
-        # these as a failing regression assertion in the negative control.
-        report.pr_control_execution_error = True
-    elif report.when == "call" and report.failed:
-        lifecycle_failure = any(
-            frame.f_globals.get("__name__") in {"unittest.case", "unittest.async_case"}
-            and frame.f_code.co_name in {"_callSetUp", "_callTearDown", "_callCleanup"}
-            for frame, _ in traceback.walk_tb(call.excinfo.tb)
-        )
-        report.pr_control_execution_error = lifecycle_failure or not call.excinfo.errisinstance(
-            (AssertionError, pytest.fail.Exception)
-        )
+def _inline(value: str) -> str:
+    """Keep literal identifiers inside one Markdown cell/heading."""
+    return "<code>" + (html.escape(str(value), quote=False).replace("`", "&#96;")
+            .replace("|", "&#124;").replace("\r", r"\r").replace("\n", r"\n")
+            .replace("\t", r"\t")) + "</code>"
 
 
-
-def pytest_runtest_logreport(report):
-    row = _records.setdefault(report.nodeid, {})
-    status = "error" if getattr(report, "pr_control_execution_error", False) else report.outcome
-    if report.failed and hasattr(report, "context"):
-        # Subtest reports share the parent nodeid. Conservatively preserve
-        # their failure as an error instead of allowing a later parent-pass
-        # report to overwrite it. Detailed subtest attribution is unsupported.
-        status = "error"
-    if report.failed:
-        _failure_details.setdefault(report.nodeid, []).append({
-            "phase": report.when,
-            "classification": status,
-            "traceback": str(report.longrepr)[-8000:],
-            "subtest": str(getattr(report, "context", "")) or None,
-        })
-    rank = {"passed": 0, "skipped": 1, "failed": 2, "error": 3}
-    previous = row.get(report.when)
-    if previous is None or rank[status] > rank[previous]:
-        row[report.when] = status
+def render_json(payload: dict) -> str:
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
-def pytest_collection_finish(session):
-    # session.items contains the selected tests after deselection. Record each
-    # occurrence: duplicate targets can legitimately run one node twice.
-    _collected.extend(item.nodeid for item in session.items)
-
-
-def pytest_runtest_logfinish(nodeid, location):
-    _finished.append(nodeid)
-
-
-def pytest_collectreport(report):
-    if report.skipped:
-        _collection_skips.append(report.nodeid)
-    if report.failed:
-        _collection_errors.append({"nodeid": report.nodeid, "error": str(report.longrepr)[-2000:]})
-
-
-def _observed_imports():
-    candidates = set(json.loads(os.environ['PR_CONTROL_PACKAGES']))
-    imports = {}
-    for name, mod in list(sys.modules.items()):
-        if name.split('.')[0] not in candidates:
-            continue
-        file = getattr(mod, '__file__', None)
-        paths = [str(Path(file).resolve())] if file else []
-        if not file:
-            paths = [str(Path(p).resolve()) for p in getattr(mod, '__path__', [])]
-        if paths:
-            imports[name] = paths
-    return imports
-
-
-@pytest.hookimpl(optionalhook=True)
-def pytest_xdist_node_collection_finished(node, ids):
-    # Every worker collects the same selected suite. Do not multiply counts
-    # by the worker count: each test occurrence is scheduled exactly once.
-    _worker_collections.append(list(ids))
-    if len(_worker_collections) == 1:
-        _collected.extend(ids)
-    elif list(ids) != _worker_collections[0]:
-        _worker_errors.append("xdist workers collected different suites")
-
-
-@pytest.hookimpl(optionalhook=True)
-def pytest_testnodedown(node, error):
-    if error:
-        _worker_errors.append("xdist worker failed: " + str(error))
-    evidence = node.workeroutput.get("pr_control_evidence")
-    if not isinstance(evidence, dict):
-        _worker_errors.append("xdist worker returned no source evidence")
-        return
-    _worker_skips.extend(evidence.get("collection_skips", []))
-    for name, paths in evidence.get("imports", {}).items():
-        _worker_imports.setdefault(name, []).extend(paths)
-
-
-def pytest_sessionfinish(session, exitstatus):
-    imports = _observed_imports()
-    if hasattr(session.config, "workerinput"):
-        # Workers communicate through xdist, never race to replace the shared
-        # report file. The controller owns outcomes and final completeness.
-        session.config.workeroutput["pr_control_evidence"] = {"imports": imports, "collection_skips": _collection_skips}
-        return
-    for name, paths in _worker_imports.items():
-        imports[name] = sorted(set(imports.get(name, []) + paths))
-    errors = _collection_errors + [{"nodeid": "xdist", "error": value} for value in _worker_errors]
-    Path(os.environ['PR_CONTROL_REPORT']).write_text(json.dumps({
-        'tests': _records, 'failure_details': _failure_details, 'collection_errors': errors,
-        'imports': imports, 'exitstatus': int(exitstatus),
-        'collected': _collected, 'finished': _finished,
-        'collection_skips': sorted(set(_collection_skips + _worker_skips)),
-    }))
+def render_markdown(payload: dict) -> str:
+    lines = [
+        f"# pr-control report: {_inline(payload['repo'])}",
+        "",
+        f"- base `{payload['base']}` vs head `{payload['head']}`",
+        f"- env: python {payload['env']['python']}, pytest {payload['env']['pytest']}, {payload['env']['platform']}",
+        "",
+        "## Verdicts (selected head tests)",
+        "",
+        "| test | base | head | verdict |",
+        "| --- | --- | --- | --- |",
+    ]
+    if payload.get("test_support"):
+        lines[6:6] = ["- explicit head test support (after selected source paths): "
+                      + ", ".join(f"{_inline(path)}" for path in payload["test_support"]), ""]
+    for row in payload["verdicts"]:
+        lines.append(f"| {_inline(row['test'])} | {row['base'] or '-'} | {row['head'] or '-'} | **{row['verdict']}** |")
+    for ref, run in payload.get("runs", {}).items():
+        skipped = run.get("collection_skips", [])
+        if skipped:
+            lines += ["", f"### {ref}: skipped during collection", ""]
+            lines += [f"- {_inline(node)}" for node in skipped]
+    if payload.get("require_no_skips"):
+        lines += ["", "- policy: --require-no-skips (runtime and collection skips fail the command)"]
+    detailed = [row for row in payload["verdicts"] if row.get("base_failure_details") or row.get("head_failure_details")]
+    if detailed:
+        lines += ["", "## Failure evidence", "", "Inspect these failures before interpreting outcome transitions."]
+        for row in detailed:
+            lines += ["", f"### {_inline(row['test'])}"]
+            for ref in ("base", "head"):
+                for failure in row.get(f"{ref}_failure_details", []):
+                    lines += ["", f"{ref}: {failure['phase']} / {failure['classification']}", "", "```text",
+                              failure['traceback'].replace("```", "~~~"), "```"]
+    sd = payload["suite_diff"]
+    lines += [
+        "",
+        "## Suite diff (same targets on both refs)",
+        "",
+        f"- complete comparable suite: {sd['complete']}",
+        f"- collected only on base: {len(sd['only_on_base'])}; only on head: {len(sd['only_on_head'])}",
+        f"- failed on base: {len(sd['base_failed'])}; failed on head: {len(sd['head_failed'])}",
+        f"- new failures on head: {len(sd['new_failures_on_head'])}",
+        f"- fixed on head: {len(sd['fixed_on_head'])}",
+    ]
+    if sd.get("occurrence_mismatches"):
+        lines += ["", "### Test occurrence count mismatches", "",
+                  "The selected test IDs match, but their execution counts differ; the suite is not comparable."]
+        for node, counts in sd["occurrence_mismatches"].items():
+            lines.append(f"- {_inline(node)}: base {counts['base']}, head {counts['head']}")
+    if sd["new_failures_on_head"]:
+        lines += ["", "### New failures on head", ""]
+        lines += [f"- {_inline(t)}" for t in sd["new_failures_on_head"]]
+    for ref, error in payload.get("collection_errors", {}).items():
+        lines += ["", f"### {ref}: incomplete run", "", "```", str(error), "```"]
+    lines += ["", "## Source provenance", ""]
+    for ref, run in payload.get("runs", {}).items():
+        lines.append(f"- {ref}: exit {run['returncode']}; source imports verified: {run['source_verified']}")
+    lines += ["", "A transition is selected-test evidence in this environment, not proof of overall fix correctness."]
+    summary = payload["summary"]
+    lines += [
+        "",
+        "## Summary",
+        "",
+        f"- fix_confirmed: {summary.get('fix_confirmed', 0)}",
+        f"- passes_both: {summary.get('passes_both', 0)}",
+        f"- regression_introduced: {summary.get('regression_introduced', 0)}",
+        f"- fails_both: {summary.get('fails_both', 0)}",
+        f"- inconclusive: {summary.get('inconclusive', 0)}",
+        f"- unrunnable: {summary.get('unrunnable', 0)}",
+        f"- transition_unverified_source: {summary.get('transition_unverified_source', 0)}",
+    ]
+    return "\n".join(lines) + "\n"
