@@ -67,6 +67,34 @@ worktree of the base ref (via `PYTHONPATH`, cwd, and pytest's
 `sys.path`). No project dependencies are installed by the verification command; refs run in
 temporary `git worktree`s that are removed afterwards.
 
+### Shared test helpers without head-source precedence
+
+Some suites import `helpers`, `conftest`, or sibling test modules directly.
+Pytest's default `importlib` mode does not add their directory to the import
+path. If collection fails for that reason, opt into explicit head test support:
+
+```bash
+pr-control . --base BASE --head HEAD --targets tests/test_utils.py \
+  --test-support tests --test-support tests/shared
+```
+
+Each directory is resolved inside the detached head worktree and appended
+**after** the selected ref's root and `src` paths. This makes shared head test
+helpers available without placing them before base source. Missing directories
+and paths or symlinks escaping head are errors. There is no automatic retry or
+switch to `prepend`; default behavior is unchanged. JSON and Markdown record
+these directories so the comparison can be reproduced.
+
+This only changes import search paths. Head helpers still execute head code;
+they are not sandboxed or treated as base source. If a head helper path provides
+a package absent on base, the observed wrong-worktree import still makes the
+comparison inconclusive. `--import-mode prepend` can still shadow source, and
+observed shadowing is rejected. Dynamically rewritten paths and subprocess-only
+imports remain outside the provenance guarantee. In particular, pr-control's
+own subprocess-driven tests can run with `--test-support tests`, but their
+outcome transitions stay `transition_unverified_source` rather than being
+upgraded to `fix_confirmed`.
+
 ## Verdicts
 
 Per changed test:
