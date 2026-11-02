@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from collections import Counter
 from pathlib import Path
 
-TEST_PATH_RE = re.compile(r"(^|/)(tests?|spec)/.*\.(py|js|ts)$|(^|/)test_.*\.py$|.*(_test|\.test|\.spec)\.(py|js|ts)$")
+TEST_PATH_RE = re.compile(r"(^|/)(tests?|spec)/.*\.(py|js|ts)$|(^|/)test_.*\.py$|.*(_test|\.test|\.spec)\.(py|js|ts)$", re.DOTALL)
 
 
 @dataclass(frozen=True)
@@ -56,13 +56,13 @@ class PrControlError(RuntimeError):
     """User-facing failure: dirty input, missing refs, unrunnable tests."""
 
 
-def _git(repo: Path, *args: str) -> str:
+def _git(repo: Path, *args: str, strip: bool = True) -> str:
     proc = subprocess.run(
         ["git", *args], cwd=repo, capture_output=True, text=True
     )
     if proc.returncode != 0:
         raise PrControlError(f"git {' '.join(args)} failed: {proc.stderr.strip()[:300]}")
-    return proc.stdout.strip()
+    return proc.stdout.strip() if strip else proc.stdout
 
 
 def check_repo(repo: Path, base: str, head: str) -> tuple[str, str]:
@@ -77,9 +77,13 @@ def check_repo(repo: Path, base: str, head: str) -> tuple[str, str]:
 
 
 def changed_test_files(repo: Path, base_sha: str, head_sha: str) -> list[str]:
-    """Test files added or modified between base and head (three-dot diff)."""
-    out = _git(repo, "diff", "--name-only", "--diff-filter=AM", f"{base_sha}...{head_sha}")
-    files = [f for f in out.splitlines() if f.strip()]
+    """Head test paths added, modified or renamed in the three-dot diff.
+
+    NUL delimiters preserve literal Unicode, whitespace and newline filenames
+    without Git's display quoting. Rename output names the head destination.
+    """
+    out = _git(repo, "diff", "--name-only", "-z", "--diff-filter=AMR", f"{base_sha}...{head_sha}", strip=False)
+    files = [f for f in out.split("\0") if f]
     return [f for f in files if f.endswith(".py") and TEST_PATH_RE.search(f) and Path(f).name != "conftest.py"]
 
 
