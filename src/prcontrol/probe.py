@@ -14,6 +14,8 @@ _finished = []
 _worker_collections = []
 _worker_imports = {}
 _worker_errors = []
+_collection_skips = []
+_worker_skips = []
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -73,6 +75,8 @@ def pytest_runtest_logfinish(nodeid, location):
 
 
 def pytest_collectreport(report):
+    if report.skipped:
+        _collection_skips.append(report.nodeid)
     if report.failed:
         _collection_errors.append({"nodeid": report.nodeid, "error": str(report.longrepr)[-2000:]})
 
@@ -111,6 +115,7 @@ def pytest_testnodedown(node, error):
     if not isinstance(evidence, dict):
         _worker_errors.append("xdist worker returned no source evidence")
         return
+    _worker_skips.extend(evidence.get("collection_skips", []))
     for name, paths in evidence.get("imports", {}).items():
         _worker_imports.setdefault(name, []).extend(paths)
 
@@ -120,7 +125,7 @@ def pytest_sessionfinish(session, exitstatus):
     if hasattr(session.config, "workerinput"):
         # Workers communicate through xdist, never race to replace the shared
         # report file. The controller owns outcomes and final completeness.
-        session.config.workeroutput["pr_control_evidence"] = {"imports": imports}
+        session.config.workeroutput["pr_control_evidence"] = {"imports": imports, "collection_skips": _collection_skips}
         return
     for name, paths in _worker_imports.items():
         imports[name] = sorted(set(imports.get(name, []) + paths))
@@ -129,4 +134,5 @@ def pytest_sessionfinish(session, exitstatus):
         'tests': _records, 'failure_details': _failure_details, 'collection_errors': errors,
         'imports': imports, 'exitstatus': int(exitstatus),
         'collected': _collected, 'finished': _finished,
+        'collection_skips': sorted(set(_collection_skips + _worker_skips)),
     }))
