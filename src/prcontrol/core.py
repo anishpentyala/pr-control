@@ -154,7 +154,7 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                "-p", "no:cacheprovider", "--rootdir", str(test_worktree), "--import-mode", import_mode]
         try:
             proc = subprocess.Popen(cmd, cwd=code_worktree, env=env, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, text=True, start_new_session=os.name == "posix")
+                                    stderr=subprocess.PIPE, text=True, errors="replace", start_new_session=os.name == "posix")
             stdout, stderr = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             # Stop ordinary child processes as well as pytest. This is cleanup,
