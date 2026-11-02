@@ -343,3 +343,52 @@ def cleanup(repo: Path, worktrees: list[Path]) -> None:
             _git(repo, "worktree", "remove", "--force", str(wt))
         except PrControlError:
             shutil.rmtree(wt, ignore_errors=True)
+
+
+def load_failure_witnesses(path: Path) -> dict[str, str]:
+    """Read exact node IDs and literal exception-message fragments, not regexes."""
+    def unique_object(pairs):
+        out = {}
+        for key, value in pairs:
+            if key in out:
+                raise PrControlError(f"duplicate failure witness node ID: {key}")
+            out[key] = value
+        return out
+
+    try:
+        data = json.loads(path.read_text(), object_pairs_hook=unique_object)
+    except (ValueError, OSError) as exc:
+        raise PrControlError(f"cannot read base failure witnesses: {exc}") from exc
+    if not isinstance(data, dict) or not data:
+        raise PrControlError("base failure witnesses must be a nonempty JSON object")
+    if any(not isinstance(k, str) or not k.strip() or not isinstance(v, str) or not v.strip()
+           for k, v in data.items()):
+        raise PrControlError("witness node IDs and message fragments must be nonempty strings")
+    return data
+
+
+def check_failure_witnesses(expected: dict[str, str], rows: list[dict], base_run: RunResult) -> dict:
+    """Gate on matching failure messages for every occurrence and attempt.
+
+    This is an explicit diagnostic policy, not evidence of causality. Matching
+    source text or traceback context is deliberately insufficient.
+    """
+    by_node = {row["test"]: row for row in rows}
+    attempts = base_run.attempts or [{"attempt": 1, "failure_details": base_run.failure_details,
+                                    "collected_counts": base_run.collected_counts}]
+    results = []
+    for node, fragment in expected.items():
+        reasons = []
+        if by_node.get(node, {}).get("verdict") != "fix_confirmed":
+            reasons.append("expected node must have a source-verified failed-to-passed transition")
+        for attempt in attempts:
+            details = attempt.get("failure_details", {}).get(node, [])
+            count = attempt.get("collected_counts", {}).get(node, 0)
+            if not count or len(details) != count:
+                reasons.append(f"attempt {attempt['attempt']}: missing failure evidence for every collected occurrence")
+            elif any(d.get("phase") != "call" or d.get("classification") != "failed"
+                     or not isinstance(d.get("exception_message"), str)
+                     or fragment not in d["exception_message"] for d in details):
+                reasons.append(f"attempt {attempt['attempt']}: assertion exception message does not match")
+        results.append({"test": node, "literal_message": fragment, "matched": not reasons, "reasons": reasons})
+    return {"passed": all(row["matched"] for row in results), "expectations": results}

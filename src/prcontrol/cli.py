@@ -10,6 +10,8 @@ from pathlib import Path
 
 from .core import (
     PrControlError,
+    load_failure_witnesses,
+    check_failure_witnesses,
     changed_test_files,
     check_repo,
     cleanup,
@@ -37,6 +39,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--targets", nargs="*", default=None,
         help="pytest targets to run on both refs (default: test files changed between base and head)",
     )
+    p.add_argument("--base-failure-witness", type=Path, default=None,
+                   help="JSON object of exact node IDs to literal assertion-message fragments; require every named control to match on every base attempt")
     p.add_argument("--repeats", type=int, default=1, help="fresh pytest subprocesses per ref (1-20); observed instability fails closed")
     p.add_argument("--timeout", type=int, default=600, help="pytest timeout per ref in seconds (default 600)")
     p.add_argument(
@@ -69,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
             raise PrControlError("--timeout must be positive")
         if args.targets == []:
             raise PrControlError("--targets needs at least one target")
+        expected_witnesses = load_failure_witnesses(args.base_failure_witness) if args.base_failure_witness else None
         base_sha, head_sha = check_repo(repo, args.base, args.head)
         targets = args.targets
         if targets is None:
@@ -106,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
             "summary": dict(summary),
             "suite_diff": suite_diff(base_run, head_run),
         }
+        if expected_witnesses is not None:
+            payload["base_failure_witness"] = check_failure_witnesses(expected_witnesses, rows, base_run)
         md = render_markdown(payload)
         js = render_json(payload)
         if args.md_out:
@@ -115,6 +122,9 @@ def main(argv: list[str] | None = None) -> int:
         if not args.md_out and not args.json_out:
             sys.stdout.write(md)
 
+        if expected_witnesses is not None and not payload["base_failure_witness"]["passed"]:
+            print("pr-control: base failure witness policy not satisfied", file=sys.stderr)
+            return 1
         has_skips = any(run.collection_skips or run.runtime_skips for run in (base_run, head_run)) or any(
             o.outcome == "skipped" for run in (base_run, head_run) for o in run.outcomes
         )
