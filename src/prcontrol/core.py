@@ -18,6 +18,8 @@ import subprocess
 import sys
 import tempfile
 import signal
+import threading
+import time
 from dataclasses import dataclass, field
 from collections import Counter
 from pathlib import Path
@@ -156,12 +158,13 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
         cmd = [sys.executable, "-m", "pytest", *abs_targets, "-q", "-p", "pr_control_probe",
                "-p", "no:cacheprovider", "--rootdir", str(test_worktree), "--import-mode", import_mode]
         try:
-            proc = subprocess.Popen(cmd, cwd=code_worktree, env=env, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, text=True, errors="replace", start_new_session=os.name == "posix")
-            stdout, stderr = proc.communicate(timeout=timeout)
+            proc = subprocess.Popen(
+                cmd, cwd=code_worktree, env=env, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, start_new_session=os.name == "posix",
+            )
+            stdout, stderr = _capture_output(proc, timeout)
         except subprocess.TimeoutExpired:
-            # Stop ordinary child processes as well as pytest. This is cleanup,
-            # not containment: hostile code can still detach from the group.
+            # Cleanup, not containment: hostile code can detach the group.
             if os.name == "posix":
                 try:
                     os.killpg(proc.pid, signal.SIGKILL)
@@ -169,8 +172,9 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                     pass
             else:
                 proc.kill()
-            proc.communicate()
-            return RunResult(ref=ref_name, returncode=-1, collection_error=f"pytest timed out after {timeout}s")
+            proc.wait()
+            return RunResult(ref=ref_name, returncode=-1,
+                             collection_error=f"pytest timed out after {timeout}s")
         try:
             data = json.loads(report.read_text())
         except (OSError, ValueError):
@@ -392,3 +396,42 @@ def check_failure_witnesses(expected: dict[str, str], rows: list[dict], base_run
                 reasons.append(f"attempt {attempt['attempt']}: assertion exception message does not match")
         results.append({"test": node, "literal_message": fragment, "matched": not reasons, "reasons": reasons})
     return {"passed": all(row["matched"] for row in results), "expectations": results}
+
+
+
+def _capture_output(proc, timeout: int, limit: int = 16384) -> tuple[str, str]:
+    """Drain both pipes with bounded tails; EOF is part of the timeout.
+
+    Children inheriting an output pipe must close it before completion, as
+    with communicate(). Daemon readers avoid blocking shutdown on a detached
+    process that escapes group cleanup. This is not hostile-code containment.
+    """
+    tails = [bytearray(), bytearray()]
+    errors = []
+
+    def drain(stream, tail):
+        try:
+            while True:
+                chunk = stream.read1(65536)
+                if not chunk:
+                    break
+                tail.extend(chunk)
+                del tail[:-limit]
+        except OSError as error:
+            errors.append(error)
+        finally:
+            stream.close()
+
+    readers = [threading.Thread(target=drain, args=(stream, tail), daemon=True)
+               for stream, tail in zip((proc.stdout, proc.stderr), tails)]
+    deadline = time.monotonic() + timeout
+    for reader in readers:
+        reader.start()
+    proc.wait(timeout=max(0, deadline - time.monotonic()))
+    for reader in readers:
+        reader.join(timeout=max(0, deadline - time.monotonic()))
+    if any(reader.is_alive() for reader in readers):
+        raise subprocess.TimeoutExpired(proc.args, timeout)
+    if errors:
+        raise errors[0]
+    return tuple(bytes(tail).decode("utf-8", errors="replace") for tail in tails)
