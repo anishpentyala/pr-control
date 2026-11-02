@@ -54,6 +54,14 @@ def render_markdown(payload: dict) -> str:
                 lines.append(f"- {ref} attempt {attempt['attempt']}: exit {attempt['returncode']}; source verified {attempt['source_verified']}; incomplete {bool(attempt['collection_error'])}")
                 for node in attempt.get("outcomes", []):
                     lines.append(f"  - {_inline(node['nodeid'])}: {node['outcome']}")
+    if "base_failure_witness" in payload:
+        policy = payload["base_failure_witness"]
+        lines += ["", "## Base failure witness policy", "",
+                  f"- passed: {policy['passed']}",
+                  "- literal assertion exception-message matching only; not a causal proof"]
+        for expected in policy["expectations"]:
+            lines.append(f"- {_inline(expected['test'])}: matched {expected['matched']}; literal {_inline(expected['literal_message'])}")
+            lines.extend(f"  - {reason}" for reason in expected["reasons"])
     detailed = [row for row in payload["verdicts"] if row.get("base_failure_details") or row.get("head_failure_details")]
     if detailed:
         lines += ["", "## Failure evidence", "", "Inspect these failures before interpreting outcome transitions."]
