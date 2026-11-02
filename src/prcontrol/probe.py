@@ -33,7 +33,12 @@ def pytest_runtest_makereport(item, call):
         # these as a failing regression assertion in the negative control.
         report.pr_control_execution_error = True
     elif report.when == "call" and report.failed:
-        report.pr_control_exception_message = str(call.excinfo.value)[:8000]
+        try:
+            report.pr_control_exception_message = str(call.excinfo.value)[:8000]
+        except Exception:
+            # Custom exception formatting may fail. Preserve ordinary outcome
+            # collection; unavailable witness text must never become a match.
+            report.pr_control_exception_message = None
         lifecycle_failure = any(
             frame.f_globals.get("__name__") in {"unittest.case", "unittest.async_case"}
             and frame.f_code.co_name in {"_callSetUp", "_callTearDown", "_callCleanup"}
