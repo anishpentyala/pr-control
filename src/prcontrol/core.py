@@ -51,6 +51,7 @@ class RunResult:
     failure_details: dict = field(default_factory=dict)
     collected_counts: dict[str, int] = field(default_factory=dict)
     collection_skips: list[str] = field(default_factory=list)
+    runtime_skips: list[str] = field(default_factory=list)
 
 
 class PrControlError(RuntimeError):
@@ -210,7 +211,8 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                          collection_error=collection_error, imports=imports,
                          source_verified=bool(imports) and not bad_imports,
                          failure_details=data.get("failure_details", {}), collected_counts=dict(collected),
-                         collection_skips=data.get("collection_skips", []))
+                         collection_skips=data.get("collection_skips", []),
+                         runtime_skips=data.get("runtime_skips", []))
 
 
 def verdicts(base_run: RunResult, head_run: RunResult) -> list[dict]:
