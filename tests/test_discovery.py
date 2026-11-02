@@ -32,7 +32,7 @@ def test_unicode_test_filename_is_not_git_quoted(make_repo):
 import pytest
 
 
-@pytest.mark.parametrize('name', ['tests/test_quoted"name.py','tests/test_tab\tname.py','tests/test_line\nname.py','tests/test_space name.py'])
+@pytest.mark.parametrize('name', ['tests/test_pipe|tick`name.py','tests/test_quoted"name.py','tests/test_tab\tname.py','tests/test_line\nname.py','tests/test_space name.py'])
 def test_literal_special_character_paths_are_preserved(make_repo,name):
     repo,base,head=make_repo({'calc.py':BUGGY_CALC},{'calc.py':FIXED_CALC,name:FIX_TEST})
     assert changed_test_files(repo,base,head)==[name]
@@ -54,3 +54,18 @@ def test_rename_into_test_path_is_selected_and_out_of_test_is_not(make_repo):
     git(repo,'mv','candidate.py','tests/test_new.py');git(repo,'mv','tests/test_old.py','retired.py')
     git(repo,'commit','-m','move into and out of tests');head=git(repo,'rev-parse','HEAD')
     assert changed_test_files(repo,base,head)==['tests/test_new.py']
+
+
+def test_literal_identifiers_keep_markdown_table_structure(make_repo):
+    name='tests/test_pipe|tick`line\nname.py'
+    repo,base,head=make_repo({'calc.py':BUGGY_CALC},{'calc.py':FIXED_CALC,name:FIX_TEST})
+    js,md=repo/'report.json',repo/'report.md'
+    proc=run_cli(repo,base,head,'--json-out',str(js),'--md-out',str(md))
+    assert proc.returncode==0,proc.stderr
+    data=json.loads(js.read_text())
+    assert data['targets']==[name]
+    assert data['summary']=={'fix_confirmed':1}
+    table=[line for line in md.read_text().splitlines() if line.startswith('| <code>tests/')]
+    assert len(table)==1
+    assert table[0].count('|')==5
+    assert '&#124;' in table[0] and '&#96;' in table[0] and r'\n' in table[0]
