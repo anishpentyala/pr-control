@@ -49,6 +49,7 @@ class RunResult:
     imports: dict = field(default_factory=dict)
     source_verified: bool = False
     failure_details: dict = field(default_factory=dict)
+    collected_counts: dict[str, int] = field(default_factory=dict)
 
 
 class PrControlError(RuntimeError):
@@ -193,7 +194,7 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
         return RunResult(ref=ref_name, returncode=proc.returncode, outcomes=outcomes,
                          collection_error=collection_error, imports=imports,
                          source_verified=bool(imports) and not bad_imports,
-                         failure_details=data.get("failure_details", {}))
+                         failure_details=data.get("failure_details", {}), collected_counts=dict(collected))
 
 
 def verdicts(base_run: RunResult, head_run: RunResult) -> list[dict]:
@@ -201,10 +202,13 @@ def verdicts(base_run: RunResult, head_run: RunResult) -> list[dict]:
     a fix test should fail on base and pass on head."""
     base_map = {o.nodeid: o.outcome for o in base_run.outcomes}
     head_map = {o.nodeid: o.outcome for o in head_run.outcomes}
+    base_counts = base_run.collected_counts or dict(Counter(o.nodeid for o in base_run.outcomes))
+    head_counts = head_run.collected_counts or dict(Counter(o.nodeid for o in head_run.outcomes))
+    occurrence_mismatch = base_counts != head_counts
     rows = []
     for nodeid in sorted(set(base_map) | set(head_map)):
         b, h = base_map.get(nodeid), head_map.get(nodeid)
-        if base_run.collection_error or head_run.collection_error:
+        if base_run.collection_error or head_run.collection_error or occurrence_mismatch:
             verdict = "inconclusive"
         elif b == "error" or h == "error":
             verdict = "unrunnable"
@@ -238,8 +242,16 @@ def suite_diff(base_run: RunResult, head_run: RunResult) -> dict:
         run.ref: sorted(o.nodeid for o in run.outcomes if o.outcome == "error")
         for run in (base_run, head_run)
     }
+    base_counts = base_run.collected_counts or dict(Counter(o.nodeid for o in base_run.outcomes))
+    head_counts = head_run.collected_counts or dict(Counter(o.nodeid for o in head_run.outcomes))
+    occurrence_mismatches = {
+        node: {"base": base_counts.get(node, 0), "head": head_counts.get(node, 0)}
+        for node in sorted(set(base_counts) | set(head_counts))
+        if base_counts.get(node, 0) != head_counts.get(node, 0)
+    }
     return {
-        "complete": (not base_run.collection_error and not head_run.collection_error
+        "occurrence_mismatches": occurrence_mismatches,
+        "complete": (not occurrence_mismatches and not base_run.collection_error and not head_run.collection_error
                      and base_nodes == head_nodes and not any(execution_errors.values())),
         "only_on_base": sorted(base_nodes - head_nodes),
         "only_on_head": sorted(head_nodes - base_nodes),
