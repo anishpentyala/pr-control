@@ -267,3 +267,37 @@ first attempt's outcomes for compatibility, and rejects instability rather
 than averaging or voting. Markdown lists each attempt's outcomes. Skip policy
 aggregates all attempts, including collection and runtime skips seen only
 later. Repeated success is selected-test evidence, not a reliability guarantee.
+
+## Optional base-failure witness policy
+
+A failed-to-passed transition can come from the wrong assertion. To require a
+specific diagnostic on named control tests, supply a JSON object whose keys are
+exact pytest node IDs and values are nonempty literal exception-message fragments:
+
+```json
+{"tests/test_calc.py::test_add": "addition must preserve both operands"}
+```
+
+```bash
+pr-control . --base BASE --head HEAD --targets tests/test_calc.py \
+  --base-failure-witness witnesses.json --fail-on no-control
+```
+
+Every named test must have a `fix_confirmed` transition, and every collected
+occurrence in every base attempt must contain the literal fragment in its call
+assertion exception message. Explicit `pytest.fail` messages are supported.
+Only the first 8,000 characters of each exception message are retained; a
+fragment outside that bound cannot match. Regex syntax has no special meaning. Matching a test's source line, comment or
+traceback context alone is insufficient. Missing/unselected nodes, skipped tests,
+execution errors, missing message evidence and any mismatched attempt fail the
+policy with exit 1, including with `--fail-on never`. JSON and Markdown retain the
+expectations, match results and reasons. Invalid or duplicate-key policy files
+fail before creating worktrees. No witness policy is applied by default; ordinary
+verdicts and `--fail-on` behavior are unchanged.
+
+This gates on observed diagnostic text, not on causality or a security guarantee.
+Pytest assertion rewriting can include observed values in an exception message;
+choose a distinctive explicit assertion message and inspect the failure evidence.
+Tests/plugins can fabricate messages or reports. Repeats still share worktrees and
+do not prove absence of flakes. The policy does not interpret expected behavior,
+validate a patch, or make untrusted tests safe to execute.
