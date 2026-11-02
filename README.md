@@ -242,3 +242,28 @@ MIT. Built with AI assistance. Tests cover documented scenarios, not all possibl
 Duplicate test IDs are aggregated conservatively by worst phase outcome. Equal
 occurrence counts make the selected suite comparable; they do not attribute
 a separate result to each duplicate occurrence.
+
+## Repeat stability checks
+
+```bash
+pr-control . --base BASE --head HEAD --repeats 3 --fail-on no-control \
+  --require-no-skips --json-out evidence.json --md-out evidence.md
+```
+
+`--repeats N` (1-20, default 1) runs each ref's selected head tests in N fresh
+pytest subprocesses. Every attempt must be complete. Observed changes in test
+outcomes, collection occurrence counts, skip sets or source-verification status make all
+verdicts inconclusive and exit 1, even with `--fail-on never`. A stable
+fail-on-base/pass-on-head transition still needs manual failure inspection;
+repetition does not prove the source change caused it or detect every flake.
+
+Attempts share their ref's worktree; files written by tests are not reset.
+This can reveal state-sensitive tests, but is not hermetic repeated execution.
+The worst-case pytest budget is `2 * N * --timeout`, plus process/reporting
+work. Each attempt has its own timeout. Dependencies are not installed.
+JSON retains each attempt's outcomes, counts, imports, skips, exit status,
+collection errors and bounded failure evidence. The top-level run uses the
+first attempt's outcomes for compatibility, and rejects instability rather
+than averaging or voting. Markdown lists each attempt's outcomes. Skip policy
+aggregates all attempts, including collection and runtime skips seen only
+later. Repeated success is selected-test evidence, not a reliability guarantee.

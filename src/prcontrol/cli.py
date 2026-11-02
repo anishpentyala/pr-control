@@ -15,7 +15,7 @@ from .core import (
     cleanup,
     env_fingerprint,
     make_worktree,
-    run_pytest,
+    run_repeated_pytest,
     suite_diff,
     verdicts,
 )
@@ -37,6 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--targets", nargs="*", default=None,
         help="pytest targets to run on both refs (default: test files changed between base and head)",
     )
+    p.add_argument("--repeats", type=int, default=1, help="fresh pytest subprocesses per ref (1-20); observed instability fails closed")
     p.add_argument("--timeout", type=int, default=600, help="pytest timeout per ref in seconds (default 600)")
     p.add_argument(
         "--import-mode", choices=["importlib", "prepend", "append"], default="importlib",
@@ -62,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
     worktrees = []
     tmp = None
     try:
+        if not 1 <= args.repeats <= 20:
+            raise PrControlError("--repeats must be between 1 and 20")
         if args.timeout <= 0:
             raise PrControlError("--timeout must be positive")
         if args.targets == []:
@@ -82,12 +85,13 @@ def main(argv: list[str] | None = None) -> int:
 
         # Both sides run the HEAD version of the tests; only the code under
         # test changes. On base: head's tests against base's code (the control).
-        base_run = run_pytest(base_wt, head_wt, "base", targets, args.timeout, args.import_mode, args.test_support)
-        head_run = run_pytest(head_wt, head_wt, "head", targets, args.timeout, args.import_mode, args.test_support)
+        base_run = run_repeated_pytest(base_wt, head_wt, "base", targets, args.timeout, args.import_mode, args.test_support, args.repeats)
+        head_run = run_repeated_pytest(head_wt, head_wt, "head", targets, args.timeout, args.import_mode, args.test_support, args.repeats)
         rows = verdicts(base_run, head_run)
         summary = Counter(r["verdict"] for r in rows)
         payload = {
             "repo": str(repo),
+            "repeats": args.repeats,
             "collection_errors": {
                 r.ref: r.collection_error for r in (base_run, head_run) if r.collection_error
             },
@@ -96,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
             "targets": targets,
             "test_support": args.test_support,
             "require_no_skips": args.require_no_skips,
-            "runs": {r.ref: {"returncode": r.returncode, "imports": r.imports, "source_verified": r.source_verified, "collected_counts": r.collected_counts, "collection_skips": r.collection_skips, "runtime_skips": r.runtime_skips} for r in (base_run, head_run)},
+            "runs": {r.ref: {"returncode": r.returncode, "imports": r.imports, "source_verified": r.source_verified, "collected_counts": r.collected_counts, "collection_skips": r.collection_skips, "runtime_skips": r.runtime_skips, "attempts": r.attempts} for r in (base_run, head_run)},
             "env": env_fingerprint(),
             "verdicts": rows,
             "summary": dict(summary),
