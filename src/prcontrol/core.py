@@ -155,22 +155,31 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             abs_targets.append(str(resolved) + ("::" + "::".join(selectors) if selectors else ""))
         cmd = [sys.executable, "-m", "pytest", *abs_targets, "-q", "-p", "pr_control_probe",
                "-p", "no:cacheprovider", "--rootdir", str(test_worktree), "--import-mode", import_mode]
-        try:
-            proc = subprocess.Popen(cmd, cwd=code_worktree, env=env, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, text=True, errors="replace", start_new_session=os.name == "posix")
-            stdout, stderr = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            # Stop ordinary child processes as well as pytest. This is cleanup,
-            # not containment: hostile code can still detach from the group.
-            if os.name == "posix":
-                try:
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-            else:
-                proc.kill()
-            proc.communicate()
-            return RunResult(ref=ref_name, returncode=-1, collection_error=f"pytest timed out after {timeout}s")
+        # Pytest may print unbounded output. Spool it to private temporary files
+        # and retain only diagnostic tails in this process, not the whole stream.
+        # This bounds verifier memory, not disk use or the tested process itself.
+        with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+            try:
+                proc = subprocess.Popen(
+                    cmd, cwd=code_worktree, env=env, stdout=stdout_file,
+                    stderr=stderr_file, start_new_session=os.name == "posix",
+                )
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                # Stop ordinary child processes as well as pytest. This is
+                # cleanup, not containment: hostile code can detach the group.
+                if os.name == "posix":
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    proc.kill()
+                proc.wait()
+                return RunResult(ref=ref_name, returncode=-1,
+                                 collection_error=f"pytest timed out after {timeout}s")
+            stdout = _output_tail(stdout_file)
+            stderr = _output_tail(stderr_file)
         try:
             data = json.loads(report.read_text())
         except (OSError, ValueError):
@@ -392,3 +401,10 @@ def check_failure_witnesses(expected: dict[str, str], rows: list[dict], base_run
                 reasons.append(f"attempt {attempt['attempt']}: assertion exception message does not match")
         results.append({"test": node, "literal_message": fragment, "matched": not reasons, "reasons": reasons})
     return {"passed": all(row["matched"] for row in results), "expectations": results}
+
+
+def _output_tail(stream, limit: int = 16384) -> str:
+    """A bounded diagnostic suffix; non-text and split UTF-8 replace safely."""
+    stream.seek(0, os.SEEK_END)
+    stream.seek(max(0, stream.tell() - limit))
+    return stream.read(limit).decode("utf-8", errors="replace")
