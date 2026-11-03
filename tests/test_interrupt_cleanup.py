@@ -122,7 +122,7 @@ def test_already_reaped_child_never_supplies_a_group_to_signal(tmp_path, monkeyp
     assert killed == [], 'cleanup signaled a released process-group number'
 
 
-@pytest.mark.skipif(os.name != 'posix', reason='POSIX waitid WNOWAIT ownership')
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX unreaped child ownership')
 @pytest.mark.parametrize('exception', [KeyboardInterrupt, OSError])
 def test_pipe_join_keeps_exited_child_unreaped_until_cleanup(tmp_path, monkeypatch, exception):
     (tmp_path / 'test_one.py').write_text('def test_one(): pass\n')
@@ -162,3 +162,16 @@ def test_already_reaped_timeout_never_signals_released_group(tmp_path, monkeypat
     result=core.run_pytest(tmp_path,tmp_path,'head',['test_one.py'],30)
     assert result.returncode==-1
     assert killed==[], 'timeout cleanup signaled a released process-group number'
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX availability simulation')
+def test_capture_works_without_waitid_on_supported_python(tmp_path, monkeypatch):
+    (tmp_path/'sample.py').write_text('VALUE=1\n')
+    (tmp_path/'test_one.py').write_text('import sample\ndef test_one():assert sample.VALUE==1\n')
+    monkeypatch.delattr(core.os,'waitid',raising=False)
+    try:
+        result=core.run_pytest(tmp_path,tmp_path,'head',['test_one.py'],30)
+    except AttributeError as error:
+        pytest.fail('verification requires unavailable waitid: '+str(error))
+    assert result.returncode==0 and result.collection_error is None
+    assert result.source_verified
