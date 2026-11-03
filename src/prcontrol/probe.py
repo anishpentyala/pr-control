@@ -17,6 +17,8 @@ _worker_errors = []
 _collection_skips = []
 _worker_skips = []
 _runtime_skips = []
+_deselected = []
+_worker_deselected = []
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -74,6 +76,10 @@ def pytest_runtest_logreport(report):
         row[report.when] = status
 
 
+def pytest_deselected(items):
+    _deselected.extend(item.nodeid for item in items)
+
+
 def pytest_collection_finish(session):
     # session.items contains the selected tests after deselection. Record each
     # occurrence: duplicate targets can legitimately run one node twice.
@@ -126,6 +132,7 @@ def pytest_testnodedown(node, error):
         _worker_errors.append("xdist worker returned no source evidence")
         return
     _worker_skips.extend(evidence.get("collection_skips", []))
+    _worker_deselected.extend(evidence.get("deselected", []))
     for name, paths in evidence.get("imports", {}).items():
         _worker_imports.setdefault(name, []).extend(paths)
 
@@ -135,7 +142,7 @@ def pytest_sessionfinish(session, exitstatus):
     if hasattr(session.config, "workerinput"):
         # Workers communicate through xdist, never race to replace the shared
         # report file. The controller owns outcomes and final completeness.
-        session.config.workeroutput["pr_control_evidence"] = {"imports": imports, "collection_skips": _collection_skips}
+        session.config.workeroutput["pr_control_evidence"] = {"imports": imports, "collection_skips": _collection_skips, "deselected": _deselected}
         return
     for name, paths in _worker_imports.items():
         imports[name] = sorted(set(imports.get(name, []) + paths))
@@ -146,4 +153,5 @@ def pytest_sessionfinish(session, exitstatus):
         'collected': _collected, 'finished': _finished,
         'collection_skips': sorted(set(_collection_skips + _worker_skips)),
         'runtime_skips': sorted(set(_runtime_skips)),
+        'deselected': sorted(set(_deselected + _worker_deselected)),
     }))
