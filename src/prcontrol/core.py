@@ -55,6 +55,7 @@ class RunResult:
     collection_skips: list[str] = field(default_factory=list)
     runtime_skips: list[str] = field(default_factory=list)
     attempts: list[dict] = field(default_factory=list)
+    deselected: list[str] = field(default_factory=list)
 
 
 class PrControlError(RuntimeError):
@@ -234,7 +235,7 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                          source_verified=bool(imports) and not bad_imports,
                          failure_details=data.get("failure_details", {}), collected_counts=dict(collected),
                          collection_skips=data.get("collection_skips", []),
-                         runtime_skips=data.get("runtime_skips", []))
+                         runtime_skips=data.get("runtime_skips", []), deselected=data.get("deselected", []))
 
 
 def run_repeated_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
@@ -254,7 +255,7 @@ def run_repeated_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
     errors = []
     signature = lambda run: (sorted((o.nodeid, o.outcome) for o in run.outcomes),
                              run.collected_counts, run.source_verified,
-                             sorted(run.collection_skips), sorted(run.runtime_skips))
+                             sorted(run.collection_skips), sorted(run.runtime_skips), sorted(run.deselected))
     for attempt, run in enumerate(runs, 1):
         evidence.append({"attempt": attempt, "returncode": run.returncode,
                          "collection_error": run.collection_error,
@@ -262,11 +263,12 @@ def run_repeated_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                          "collected_counts": run.collected_counts, "imports": run.imports,
                          "source_verified": run.source_verified,
                          "failure_details": run.failure_details,
-                         "collection_skips": run.collection_skips, "runtime_skips": run.runtime_skips})
+                         "collection_skips": run.collection_skips, "runtime_skips": run.runtime_skips,
+                         "deselected": run.deselected})
         if run.collection_error:
             errors.append(f"attempt {attempt}: {run.collection_error}")
         if signature(run) != signature(first):
-            errors.append(f"attempt {attempt}: unstable repeated outcomes, collection counts, skips or source verification")
+            errors.append(f"attempt {attempt}: unstable repeated outcomes, collection counts, skips, deselection or source verification")
     # Keep the first observed outcomes, but reject instability instead of voting.
     return RunResult(ref=ref_name, returncode=first.returncode, outcomes=first.outcomes,
                      collection_error="; ".join(errors) or None,
@@ -274,7 +276,8 @@ def run_repeated_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                      failure_details=first.failure_details, collected_counts=first.collected_counts,
                      collection_skips=sorted({n for r in runs for n in r.collection_skips}),
                      runtime_skips=sorted({n for r in runs for n in r.runtime_skips}),
-                     attempts=evidence)
+                     attempts=evidence,
+                     deselected=sorted({n for r in runs for n in r.deselected}))
 
 
 def verdicts(base_run: RunResult, head_run: RunResult) -> list[dict]:

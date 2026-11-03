@@ -321,3 +321,19 @@ identity owned until exception cleanup can no longer need to signal it. Cleanup
 does not signal a group after the subprocess has already been reaped. This is
 ordinary child cleanup, not protection against another thread reaping the child,
 a custom SIGCHLD handler, detached processes, or hostile test code.
+
+## Optional deselection policy
+
+Pytest `-k`, `-m` and selection plugins can exclude collected tests while a
+remaining control still shows a failed-to-passed transition. Reported deselected
+node IDs are now retained separately from skips in JSON and Markdown, including
+each repeat attempt and xdist worker evidence. Add `--require-no-deselections`
+to exit 1 when either side reports any deselection, even with `--fail-on never`.
+The default still permits filtered suites and compares the tests that ran.
+Changes in reported deselection between repeats make the result inconclusive.
+
+This records pytest's `pytest_deselected` hook, not all potential tests in a
+repository. An explicit node target, ignored file, collection path exclusion or
+plugin that removes items without reporting that hook can exclude tests without
+appearing here. It is not proof of whole-project coverage, nor a way to make
+untrusted tests safe. `--require-no-skips` remains a separate policy.

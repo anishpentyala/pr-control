@@ -37,6 +37,10 @@ def render_markdown(payload: dict) -> str:
     for row in payload["verdicts"]:
         lines.append(f"| {_inline(row['test'])} | {row['base'] or '-'} | {row['head'] or '-'} | **{row['verdict']}** |")
     for ref, run in payload.get("runs", {}).items():
+        if run.get("deselected"):
+            lines += ["", f"### {ref}: deselected tests", "",
+                      "Reported by pytest selection hooks; not skipped tests or executed coverage."]
+            lines += [f"- {_inline(node)}" for node in run["deselected"]]
         runtime = run.get("runtime_skips", [])
         if runtime:
             lines += ["", f"### {ref}: skipped during execution", ""]
@@ -45,6 +49,8 @@ def render_markdown(payload: dict) -> str:
         if skipped:
             lines += ["", f"### {ref}: skipped during collection", ""]
             lines += [f"- {_inline(node)}" for node in skipped]
+    if payload.get("require_no_deselections"):
+        lines += ["", "- policy: --require-no-deselections (reported deselection fails the command)"]
     if payload.get("require_no_skips"):
         lines += ["", "- policy: --require-no-skips (runtime and collection skips fail the command)"]
     if payload.get("repeats", 1) > 1:
@@ -52,6 +58,8 @@ def render_markdown(payload: dict) -> str:
         for ref, run in payload.get("runs", {}).items():
             for attempt in run.get("attempts", []):
                 lines.append(f"- {ref} attempt {attempt['attempt']}: exit {attempt['returncode']}; source verified {attempt['source_verified']}; incomplete {bool(attempt['collection_error'])}")
+                if attempt.get("deselected"):
+                    lines.append("  - reported deselection: " + ", ".join(_inline(node) for node in attempt["deselected"]))
                 for node in attempt.get("outcomes", []):
                     lines.append(f"  - {_inline(node['nodeid'])}: {node['outcome']}")
     if "base_failure_witness" in payload:
