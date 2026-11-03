@@ -168,7 +168,8 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             # Cleanup, not containment: hostile code can detach the group.
             if os.name == "posix":
                 try:
-                    os.killpg(proc.pid, signal.SIGKILL)
+                    if proc.returncode is None:
+                        os.killpg(proc.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
             else:
@@ -183,7 +184,8 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             if proc is not None:
                 if os.name == "posix":
                     try:
-                        os.killpg(proc.pid, signal.SIGKILL)
+                        if proc.returncode is None:
+                            os.killpg(proc.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
                 else:
@@ -442,11 +444,26 @@ def _capture_output(proc, timeout: int, limit: int = 16384) -> tuple[str, str]:
     deadline = time.monotonic() + timeout
     for reader in readers:
         reader.start()
-    proc.wait(timeout=max(0, deadline - time.monotonic()))
+    if os.name == "posix":
+        # Observe exit without reaping: the child's PID pins its process-group
+        # identity until pipe readers finish and no exception cleanup can need
+        # to signal that group. poll()/wait() here would release that identity.
+        while True:
+            status = os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOWAIT | os.WNOHANG)
+            if status is not None:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(proc.args, timeout)
+            time.sleep(min(0.01, remaining))
+    else:
+        proc.wait(timeout=max(0, deadline - time.monotonic()))
     for reader in readers:
         reader.join(timeout=max(0, deadline - time.monotonic()))
     if any(reader.is_alive() for reader in readers):
         raise subprocess.TimeoutExpired(proc.args, timeout)
     if errors:
         raise errors[0]
-    return tuple(bytes(tail).decode("utf-8", errors="replace") for tail in tails)
+    output = tuple(bytes(tail).decode("utf-8", errors="replace") for tail in tails)
+    proc.wait(timeout=max(0, deadline - time.monotonic()))
+    return output
