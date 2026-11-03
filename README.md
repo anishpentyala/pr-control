@@ -308,3 +308,9 @@ choose a distinctive explicit assertion message and inspect the failure evidence
 Tests/plugins can fabricate messages or reports. Repeats still share worktrees and
 do not prove absence of flakes. The policy does not interpret expected behavior,
 validate a patch, or make untrusted tests safe to execute.
+
+If the controller is interrupted while waiting for pytest, it stops and reaps
+that pytest process before propagating the interruption and removing worktrees.
+On POSIX this uses the same process-group cleanup as a timeout. This covers
+ordinary children that stay in the group, not detached or hostile processes;
+Windows cleanup still only stops the direct pytest process.
