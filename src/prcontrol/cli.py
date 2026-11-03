@@ -50,6 +50,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--test-support", action="append", default=[], metavar="DIR",
                    help="head test-helper directory appended after selected source paths; repeatable, no automatic fallback")
+    p.add_argument("--require-no-deselections", action="store_true",
+                   help="exit 1 if pytest reports deselected tests on either ref; default permits and reports selection filtering")
     p.add_argument("--require-no-skips", action="store_true",
                    help="exit 1 if either side skips a selected test; default permits and reports skips")
     p.add_argument("--json-out", type=Path, default=None, help="write the JSON report here")
@@ -105,7 +107,8 @@ def main(argv: list[str] | None = None) -> int:
             "targets": targets,
             "test_support": args.test_support,
             "require_no_skips": args.require_no_skips,
-            "runs": {r.ref: {"returncode": r.returncode, "imports": r.imports, "source_verified": r.source_verified, "collected_counts": r.collected_counts, "collection_skips": r.collection_skips, "runtime_skips": r.runtime_skips, "attempts": r.attempts} for r in (base_run, head_run)},
+            "require_no_deselections": args.require_no_deselections,
+            "runs": {r.ref: {"returncode": r.returncode, "imports": r.imports, "source_verified": r.source_verified, "collected_counts": r.collected_counts, "collection_skips": r.collection_skips, "runtime_skips": r.runtime_skips, "deselected": r.deselected, "attempts": r.attempts} for r in (base_run, head_run)},
             "env": env_fingerprint(),
             "verdicts": rows,
             "summary": dict(summary),
@@ -124,6 +127,9 @@ def main(argv: list[str] | None = None) -> int:
 
         if expected_witnesses is not None and not payload["base_failure_witness"]["passed"]:
             print("pr-control: base failure witness policy not satisfied", file=sys.stderr)
+            return 1
+        if args.require_no_deselections and any(run.deselected for run in (base_run, head_run)):
+            print("pr-control: deselected tests violate --require-no-deselections", file=sys.stderr)
             return 1
         has_skips = any(run.collection_skips or run.runtime_skips for run in (base_run, head_run)) or any(
             o.outcome == "skipped" for run in (base_run, head_run) for o in run.outcomes
