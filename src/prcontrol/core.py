@@ -444,20 +444,10 @@ def _capture_output(proc, timeout: int, limit: int = 16384) -> tuple[str, str]:
     deadline = time.monotonic() + timeout
     for reader in readers:
         reader.start()
-    if os.name == "posix":
-        # Observe exit without reaping: the child's PID pins its process-group
-        # identity until pipe readers finish and no exception cleanup can need
-        # to signal that group. poll()/wait() here would release that identity.
-        while True:
-            status = os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOWAIT | os.WNOHANG)
-            if status is not None:
-                break
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise subprocess.TimeoutExpired(proc.args, timeout)
-            time.sleep(min(0.01, remaining))
-    else:
-        proc.wait(timeout=max(0, deadline - time.monotonic()))
+    # Drain/join before wait(): until the final reap, an exited child keeps
+    # its PID and process-group identity owned. This needs no waitid API and
+    # also covers older supported macOS Python runtimes. EOF is bounded by
+    # the same deadline, including children inheriting either output pipe.
     for reader in readers:
         reader.join(timeout=max(0, deadline - time.monotonic()))
     if any(reader.is_alive() for reader in readers):
