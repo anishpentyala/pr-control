@@ -315,8 +315,8 @@ On POSIX this uses the same process-group cleanup as a timeout. This covers
 ordinary children that stay in the group, not detached or hostile processes;
 Windows cleanup still only stops the direct pytest process.
 
-On POSIX, output capture observes child exit with waitid(WNOWAIT), keeping the
-exited child unreaped while pipe readers finish. This keeps its process-group
+On POSIX, output capture joins pipe readers before waiting for and reaping the
+child. An exited child stays unreaped while pipe readers finish. This keeps its process-group
 identity owned until exception cleanup can no longer need to signal it. Cleanup
 does not signal a group after the subprocess has already been reaped. This is
 ordinary child cleanup, not protection against another thread reaping the child,
