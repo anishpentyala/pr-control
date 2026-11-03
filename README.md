@@ -308,3 +308,16 @@ choose a distinctive explicit assertion message and inspect the failure evidence
 Tests/plugins can fabricate messages or reports. Repeats still share worktrees and
 do not prove absence of flakes. The policy does not interpret expected behavior,
 validate a patch, or make untrusted tests safe to execute.
+
+If the controller is interrupted while waiting for pytest, it stops and reaps
+that pytest process before propagating the interruption and removing worktrees.
+On POSIX this uses the same process-group cleanup as a timeout. This covers
+ordinary children that stay in the group, not detached or hostile processes;
+Windows cleanup still only stops the direct pytest process.
+
+On POSIX, output capture joins pipe readers before waiting for and reaping the
+child. An exited child stays unreaped while pipe readers finish. This keeps its process-group
+identity owned until exception cleanup can no longer need to signal it. Cleanup
+does not signal a group after the subprocess has already been reaped. This is
+ordinary child cleanup, not protection against another thread reaping the child,
+a custom SIGCHLD handler, detached processes, or hostile test code.

@@ -157,6 +157,7 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             abs_targets.append(str(resolved) + ("::" + "::".join(selectors) if selectors else ""))
         cmd = [sys.executable, "-m", "pytest", *abs_targets, "-q", "-p", "pr_control_probe",
                "-p", "no:cacheprovider", "--rootdir", str(test_worktree), "--import-mode", import_mode]
+        proc = None
         try:
             proc = subprocess.Popen(
                 cmd, cwd=code_worktree, env=env, stdout=subprocess.PIPE,
@@ -167,7 +168,8 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             # Cleanup, not containment: hostile code can detach the group.
             if os.name == "posix":
                 try:
-                    os.killpg(proc.pid, signal.SIGKILL)
+                    if proc.returncode is None:
+                        os.killpg(proc.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
             else:
@@ -175,6 +177,21 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             proc.wait()
             return RunResult(ref=ref_name, returncode=-1,
                              collection_error=f"pytest timed out after {timeout}s")
+        except BaseException:
+            # A caller interrupt or pipe-read failure must not abandon the
+            # separately started pytest session while worktrees are removed.
+            # Re-raise the original exception after ordinary child cleanup.
+            if proc is not None:
+                if os.name == "posix":
+                    try:
+                        if proc.returncode is None:
+                            os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    proc.kill()
+                proc.wait()
+            raise
         try:
             data = json.loads(report.read_text())
         except (OSError, ValueError):
@@ -427,11 +444,16 @@ def _capture_output(proc, timeout: int, limit: int = 16384) -> tuple[str, str]:
     deadline = time.monotonic() + timeout
     for reader in readers:
         reader.start()
-    proc.wait(timeout=max(0, deadline - time.monotonic()))
+    # Drain/join before wait(): until the final reap, an exited child keeps
+    # its PID and process-group identity owned. This needs no waitid API and
+    # also covers older supported macOS Python runtimes. EOF is bounded by
+    # the same deadline, including children inheriting either output pipe.
     for reader in readers:
         reader.join(timeout=max(0, deadline - time.monotonic()))
     if any(reader.is_alive() for reader in readers):
         raise subprocess.TimeoutExpired(proc.args, timeout)
     if errors:
         raise errors[0]
-    return tuple(bytes(tail).decode("utf-8", errors="replace") for tail in tails)
+    output = tuple(bytes(tail).decode("utf-8", errors="replace") for tail in tails)
+    proc.wait(timeout=max(0, deadline - time.monotonic()))
+    return output
