@@ -157,6 +157,7 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             abs_targets.append(str(resolved) + ("::" + "::".join(selectors) if selectors else ""))
         cmd = [sys.executable, "-m", "pytest", *abs_targets, "-q", "-p", "pr_control_probe",
                "-p", "no:cacheprovider", "--rootdir", str(test_worktree), "--import-mode", import_mode]
+        proc = None
         try:
             proc = subprocess.Popen(
                 cmd, cwd=code_worktree, env=env, stdout=subprocess.PIPE,
@@ -175,6 +176,20 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             proc.wait()
             return RunResult(ref=ref_name, returncode=-1,
                              collection_error=f"pytest timed out after {timeout}s")
+        except BaseException:
+            # A caller interrupt or pipe-read failure must not abandon the
+            # separately started pytest session while worktrees are removed.
+            # Re-raise the original exception after ordinary child cleanup.
+            if proc is not None:
+                if os.name == "posix":
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    proc.kill()
+                proc.wait()
+            raise
         try:
             data = json.loads(report.read_text())
         except (OSError, ValueError):
