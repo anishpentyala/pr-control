@@ -105,3 +105,60 @@ def test_spawn_failure_preserves_original_error(tmp_path, monkeypatch):
     monkeypatch.setattr(core.subprocess, 'Popen', fail)
     with pytest.raises(OSError, match='synthetic spawn failure'):
         core.run_pytest(tmp_path, tmp_path, 'head', ['test_one.py'], 30)
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX process-group identity')
+@pytest.mark.parametrize('exception', [KeyboardInterrupt, OSError])
+def test_already_reaped_child_never_supplies_a_group_to_signal(tmp_path, monkeypatch, exception):
+    (tmp_path / 'test_one.py').write_text('def test_one(): pass\n')
+    killed=[]
+    def reaped_then_error(proc, timeout):
+        proc.communicate(timeout=15)
+        assert proc.returncode is not None
+        raise exception('synthetic error after reap')
+    monkeypatch.setattr(core, '_capture_output', reaped_then_error)
+    monkeypatch.setattr(core.os, 'killpg', lambda pid,sig:killed.append((pid,sig)))
+    with pytest.raises(exception, match='synthetic error after reap'):
+        core.run_pytest(tmp_path,tmp_path,'head',['test_one.py'],30)
+    assert killed == [], 'cleanup signaled a released process-group number'
+
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX waitid WNOWAIT ownership')
+@pytest.mark.parametrize('exception', [KeyboardInterrupt, OSError])
+def test_pipe_join_keeps_exited_child_unreaped_until_cleanup(tmp_path, monkeypatch, exception):
+    (tmp_path / 'test_one.py').write_text('def test_one(): pass\n')
+    children=[]
+    popen=core.subprocess.Popen
+    join=core.threading.Thread.join
+    def record(*args,**kwargs):
+        p=popen(*args,**kwargs);children.append(p);return p
+    injected=[]
+    def interrupted_join(thread,*args,**kwargs):
+        if not injected:
+            p=children[0]
+            # This must be a zombie still owned by us, not a released PID.
+            injected.append(p.returncode is None)
+            raise exception('synthetic pipe join interruption')
+        return join(thread,*args,**kwargs)
+    monkeypatch.setattr(core.subprocess,'Popen',record)
+    monkeypatch.setattr(core.threading.Thread,'join',interrupted_join)
+    try:
+        with pytest.raises(exception,match='synthetic pipe join interruption'):
+            core.run_pytest(tmp_path,tmp_path,'head',['test_one.py'],30)
+        assert injected == [True], 'child identity released before pipe cleanup'
+        assert children[0].returncode is not None
+    finally:
+        for p in children:
+            if p.returncode is None:p.kill();p.wait()
+
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX process-group identity')
+def test_already_reaped_timeout_never_signals_released_group(tmp_path, monkeypatch):
+    (tmp_path/'test_one.py').write_text('def test_one(): pass\n')
+    killed=[]
+    def reaped_then_timeout(proc,timeout):
+        proc.communicate(timeout=15)
+        raise subprocess.TimeoutExpired(proc.args,timeout)
+    monkeypatch.setattr(core,'_capture_output',reaped_then_timeout)
+    monkeypatch.setattr(core.os,'killpg',lambda pid,sig:killed.append((pid,sig)))
+    result=core.run_pytest(tmp_path,tmp_path,'head',['test_one.py'],30)
+    assert result.returncode==-1
+    assert killed==[], 'timeout cleanup signaled a released process-group number'
