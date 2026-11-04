@@ -137,8 +137,8 @@ There is no automatic fixture or helper copying. Production package
 package initializers and helpers must already exist where the tests need them;
 missing imports fail closed rather than falling back to head source.
 
-Candidate pytest config files (`pytest.ini`, `.pytest.ini`, `pyproject.toml`,
-`tox.ini`, `setup.cfg`) along the selected tests' ancestor paths must have
+Candidate pytest config files (`pytest.toml`, `.pytest.toml`, `pytest.ini`,
+`.pytest.ini`, `pyproject.toml`, `tox.ini`, `setup.cfg`) along the selected tests' ancestor paths must have
 identical bytes or be absent on both refs. Symlink paths, paths escaping the
 worktrees, differing implicit fixtures, and changed files detected before the
 write are errors. `--test-support` cannot be combined with this mode.
