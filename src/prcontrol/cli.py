@@ -22,6 +22,7 @@ from .core import (
     verdicts,
 )
 from .report import render_json, render_markdown
+from .overlay import plan_overlay, apply_overlay, check_overlay_context
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,6 +51,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--test-support", action="append", default=[], metavar="DIR",
                    help="head test-helper directory appended after selected source paths; repeatable, no automatic fallback")
+    p.add_argument("--overlay-tests", action="store_true",
+                   help="copy selected head test files into each disposable code tree; reject differing pytest configs or implicit fixture changes")
+    p.add_argument("--overlay-fixture", action="append", default=[], metavar="FILE",
+                   help="explicit ancestor conftest.py to copy with --overlay-tests; repeatable, no automatic fixture discovery")
     p.add_argument("--require-no-deselections", action="store_true",
                    help="exit 1 if pytest reports deselected tests on either ref; default permits and reports selection filtering")
     p.add_argument("--require-no-skips", action="store_true",
@@ -75,6 +80,10 @@ def main(argv: list[str] | None = None) -> int:
             raise PrControlError("--timeout must be positive")
         if args.targets == []:
             raise PrControlError("--targets needs at least one target")
+        if args.overlay_fixture and not args.overlay_tests:
+            raise PrControlError("--overlay-fixture requires --overlay-tests")
+        if args.overlay_tests and args.test_support:
+            raise PrControlError("--overlay-tests does not support --test-support; keep packaged helpers on both source refs")
         expected_witnesses = load_failure_witnesses(args.base_failure_witness) if args.base_failure_witness else None
         base_sha, head_sha = check_repo(repo, args.base, args.head)
         targets = args.targets
@@ -92,7 +101,23 @@ def main(argv: list[str] | None = None) -> int:
 
         # Both sides run the HEAD version of the tests; only the code under
         # test changes. On base: head's tests against base's code (the control).
-        base_run = run_repeated_pytest(base_wt, head_wt, "base", targets, args.timeout, args.import_mode, args.test_support, args.repeats)
+        overlay = None
+        base_tests = head_wt
+        if args.overlay_tests:
+            try:
+                contexts = {name: check_overlay_context(head_wt, tree, targets, args.overlay_fixture)
+                            for name, tree in (("base", base_wt), ("head", head_wt))}
+                plans = {name: plan_overlay(head_wt, tree, targets, args.overlay_fixture)
+                         for name, tree in (("base", base_wt), ("head", head_wt))}
+                manifests = {name: apply_overlay(head_wt, tree, plans[name])
+                             for name, tree in (("base", base_wt), ("head", head_wt))}
+            except ValueError as exc:
+                raise PrControlError(str(exc)) from exc
+            overlay = {"files": manifests, "context": contexts,
+                       "fixtures": args.overlay_fixture,
+                       "scope": "selected head tests and explicit fixtures in disposable selected-code trees; not an untouched baseline"}
+            base_tests = base_wt
+        base_run = run_repeated_pytest(base_wt, base_tests, "base", targets, args.timeout, args.import_mode, args.test_support, args.repeats)
         head_run = run_repeated_pytest(head_wt, head_wt, "head", targets, args.timeout, args.import_mode, args.test_support, args.repeats)
         rows = verdicts(base_run, head_run)
         summary = Counter(r["verdict"] for r in rows)
@@ -114,6 +139,8 @@ def main(argv: list[str] | None = None) -> int:
             "summary": dict(summary),
             "suite_diff": suite_diff(base_run, head_run),
         }
+        if overlay is not None:
+            payload["test_overlay"] = overlay
         if expected_witnesses is not None:
             payload["base_failure_witness"] = check_failure_witnesses(expected_witnesses, rows, base_run)
         md = render_markdown(payload)

@@ -105,6 +105,60 @@ own subprocess-driven tests can run with `--test-support tests`, but their
 outcome transitions stay `transition_unverified_source` rather than being
 upgraded to `fix_confirmed`.
 
+## Tests inside the source package
+
+Some projects put tests and fixtures under the importable source package, such
+as `src/calc/tests`. Pytest may import the head package while collecting those
+tests even when the selected code is base. The default mode keeps rejecting
+those mismatched imports; changing `--import-mode` does not always fix them.
+
+For trusted repositories, an explicit alternative copies the selected head
+test files into each disposable selected-code worktree before running pytest:
+
+```bash
+pr-control ./repo --base BASE --head HEAD --overlay-tests \
+  --targets src/calc/tests/test_value.py::test_value \
+  --json-out result.json --md-out result.md
+```
+
+This mode requires explicit Python test-file paths, not directory targets.
+Without `--targets`, the usual changed-test-file discovery supplies those paths.
+Only selected test files are copied. If an ancestor `conftest.py` differs between
+refs, the command rejects it unless you name that fixture explicitly:
+
+```bash
+pr-control ./repo --base BASE --head HEAD --overlay-tests \
+  --overlay-fixture src/calc/conftest.py \
+  --targets src/calc/tests/test_value.py
+```
+
+There is no automatic fixture or helper copying. Production package
+`__init__.py` files and other source modules stay on their selected refs. Test
+package initializers and helpers must already exist where the tests need them;
+missing imports fail closed rather than falling back to head source.
+
+Candidate pytest config files (`pytest.ini`, `.pytest.ini`, `pyproject.toml`,
+`tox.ini`, `setup.cfg`) along the selected tests' ancestor paths must have
+identical bytes or be absent on both refs. Symlink paths, paths escaping the
+worktrees, differing implicit fixtures, and changed files detected before the
+write are errors. `--test-support` cannot be combined with this mode.
+
+JSON and Markdown identify the overlay and retain SHA256 hashes of every copied
+head file and the selected tree's previous bytes (or `null` when absent).
+JSON also records checked config/fixture hashes. The baseline is explicitly a
+selected-code tree with head tests/approved fixtures overlaid, not an untouched
+checkout. Import-origin verification is unchanged and still rejects observed
+production imports from another worktree. An explicit fixture can change test
+behavior; its manifest is evidence to inspect, not proof that production changes
+caused a result. Repeated runs share the overlaid worktree without resetting
+files between attempts, as in the default mode.
+
+The copy process checks trusted local worktrees, not concurrent hostile edits;
+it is not an atomic filesystem transaction or a sandbox. A failed write aborts
+and discards the disposable worktrees. Tests still have ordinary process access
+and can alter paths or falsify reports. Per-ref dependencies and external pytest
+configuration are not managed.
+
 ## Parallel pytest suites with xdist
 
 If the environment has `pytest-xdist`, existing `PYTEST_ADDOPTS` such as
