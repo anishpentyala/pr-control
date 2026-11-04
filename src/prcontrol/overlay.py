@@ -78,7 +78,8 @@ def apply_overlay(head, code, plan):
     return [{k:v for k,v in row.items() if k != 'data'} for row,_ in verified]
 
 
-_CONFIG_NAMES = ("pytest.ini", ".pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg")
+_CONFIG_NAMES = ("pytest.toml", ".pytest.toml", "pytest.ini", ".pytest.ini",
+                 "pyproject.toml", "tox.ini", "setup.cfg")
 
 
 def check_overlay_context(head, code, targets, fixture_files=()):
