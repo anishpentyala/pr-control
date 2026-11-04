@@ -29,6 +29,10 @@ def render_markdown(payload: dict) -> str:
         "| test | base | head | verdict |",
         "| --- | --- | --- | --- |",
     ]
+    if payload.get("test_overlay"):
+        overlay = payload["test_overlay"]
+        lines[6:6] = ["- explicit test overlay: " + overlay["scope"],
+                      "- config/ancestor fixture bytes checked; no automatic production/helper copying", ""]
     if payload.get("test_support"):
         lines[6:6] = ["- explicit head test support (after selected source paths): "
                       + ", ".join(f"{_inline(path)}" for path in payload["test_support"]), ""]
@@ -100,6 +104,12 @@ def render_markdown(payload: dict) -> str:
         lines += [f"- {_inline(t)}" for t in sd["new_failures_on_head"]]
     for ref, error in payload.get("collection_errors", {}).items():
         lines += ["", f"### {ref}: incomplete run", "", "```", str(error), "```"]
+    if payload.get("test_overlay"):
+        lines += ["", "## Test overlay manifest", "",
+                  "Production source paths remain verified; selected test/fixture bytes are explicitly replaced."]
+        for ref, files in payload["test_overlay"]["files"].items():
+            for item in files:
+                lines.append(f"- {ref}: {_inline(item['path'])}; head sha256 `{item['head_sha256']}`; previous `{item['previous_sha256']}`")
     lines += ["", "## Source provenance", ""]
     for ref, run in payload.get("runs", {}).items():
         lines.append(f"- {ref}: exit {run['returncode']}; source imports verified: {run['source_verified']}")
