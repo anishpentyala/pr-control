@@ -194,8 +194,9 @@ Per changed test:
 
 Plus a same-suite diff: failures that appeared on head, and failures that
 disappeared. Malformed or incompatible probe report shapes fail closed as incomplete runs
-before outcomes or import paths are used. Required report fields, phase/status
-values, absolute import paths, and consumed optional evidence fields are
+before outcomes or import paths are used. Repeated decoded JSON member names
+at any object depth (even equal values) and excessively nested unreadable JSON
+are rejected before shape checks. Required report fields, phase/status values, absolute import paths, and consumed optional evidence fields are
 checked. Finished tests must have outcome records; outcomes must belong to
 the collected suite. A successful session must have exactly the finished test
 identities, and optional per-test source and failure detail keys must refer to
