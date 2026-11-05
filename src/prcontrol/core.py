@@ -204,8 +204,17 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                 proc.wait()
             raise
         try:
-            data = json.loads(report.read_text())
-        except (OSError, ValueError):
+            def unique_object(pairs):
+                value = {}
+                for key, item in pairs:
+                    if key in value:
+                        # Keys/values can contain user data. Keep diagnostics
+                        # generic and do not choose one conflicting member.
+                        raise ValueError("duplicate probe JSON object member")
+                    value[key] = item
+                return value
+            data = json.loads(report.read_text(), object_pairs_hook=unique_object)
+        except (OSError, ValueError, RecursionError):
             return RunResult(ref=ref_name, returncode=proc.returncode,
                              collection_error="pytest produced no valid report: " + (stderr or stdout)[-500:])
         if not valid_probe_report(data, proc.returncode):
