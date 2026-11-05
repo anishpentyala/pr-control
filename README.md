@@ -448,3 +448,15 @@ case can supply confirmation. Module names and filenames are diagnostic data,
 not an execution sandbox or tamper-proof proof: tests/plugins can fabricate
 reports, and a local call can still be irrelevant to the assertion. Inspect
 the failure witness and actual call paths before interpreting causality.
+
+The per-test profiler caches at most 4,096 candidate (code-object identity,
+module-name) pairs during a single test call to avoid resolving the same
+filename for every repeated function call. Candidate pairs include origins
+subsequently excluded from evidence, such as pseudo-filenames and test files.
+It retains those code
+objects until that call ends, then discards the cache. Beyond the cap, new
+frames are still checked without caching, so saturation does not erase source
+evidence. This bounds cache entries, not total profiler/report memory, and
+profiling overhead still depends on the workload. Cache lookup and setup can
+cost time on cold or unique-call workloads; repeated-call improvements are not
+a guarantee that every workload becomes faster.

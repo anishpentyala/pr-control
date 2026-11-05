@@ -18,12 +18,24 @@ def pytest_runtest_call(item):
     previous = sys.getprofile()
     selected_tests = set(json.loads(os.environ["PR_CONTROL_SELECTED_TEST_FILES"]))
     paths = set()
+    observed = {}
     candidates = set(json.loads(os.environ["PR_CONTROL_PACKAGES"]))
 
     def profile(frame, event, arg):
         if event == "call":
             name = frame.f_globals.get("__name__", "")
             if isinstance(name, str) and name.split(".")[0] in candidates:
+                # A single frame origin contributes at most one path per call.
+                # Cache observed candidate code/name pairs within this test call,
+                # including pseudo/test origins later excluded from evidence.
+                key = (id(frame.f_code), name)
+                if key in observed:
+                    return
+                # Retain code identity until the cache is discarded so a
+                # generated code object cannot reuse a cached id. Bound this
+                # optimization; uncached frames still contribute evidence.
+                if len(observed) < 4096:
+                    observed[key] = frame.f_code
                 filename = frame.f_code.co_filename
                 # Generated code may claim a local module name but has no
                 # observed file origin. Never resolve <string> under cwd.
