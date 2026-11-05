@@ -58,6 +58,7 @@ class RunResult:
     runtime_skips: list[str] = field(default_factory=list)
     attempts: list[dict] = field(default_factory=list)
     deselected: list[str] = field(default_factory=list)
+    test_source: dict | None = None
 
 
 class PrControlError(RuntimeError):
@@ -127,7 +128,7 @@ def _package_names(worktree: Path) -> set[str]:
 
 def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                targets: list[str], timeout: int, import_mode: str = "importlib",
-               test_support: list[str] | None = None) -> RunResult:
+               test_support: list[str] | None = None, per_test_source: bool = False) -> RunResult:
     """Run head tests against selected source and inspect imported file origins.
 
     Tests and plugins can override imports or falsify reports. This is a
@@ -148,6 +149,10 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
         report = probe_dir / "report.json"
         env = dict(os.environ, PYTHONPATH=os.pathsep.join(
             [str(probe_dir), _pythonpath_for(code_worktree), *support_dirs]))
+        if per_test_source:
+            env["PR_CONTROL_TEST_SOURCE"] = "1"
+        else:
+            env.pop("PR_CONTROL_TEST_SOURCE", None)
         env.update(PR_CONTROL_REPORT=str(report), PR_CONTROL_PACKAGES=json.dumps(sorted(packages)))
         abs_targets = []
         for target in targets:
@@ -158,6 +163,9 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             if not resolved.exists():
                 raise PrControlError(f"target does not exist on head: {file}")
             abs_targets.append(str(resolved) + ("::" + "::".join(selectors) if selectors else ""))
+        env["PR_CONTROL_SELECTED_TEST_FILES"] = json.dumps([
+            str((test_worktree / target.split("::")[0]).resolve()) for target in targets
+        ])
         cmd = [sys.executable, "-m", "pytest", *abs_targets, "-q", "-p", "pr_control_probe",
                "-p", "no:cacheprovider", "--rootdir", str(test_worktree), "--import-mode", import_mode]
         proc = None
@@ -203,6 +211,17 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
         if not valid_probe_report(data, proc.returncode):
             return RunResult(ref=ref_name, returncode=proc.returncode,
                              collection_error="invalid probe report shape; outcomes and source evidence unavailable")
+        test_source = None
+        if per_test_source:
+            raw_sources = data.get("test_source")
+            if not isinstance(raw_sources, dict):
+                return RunResult(ref=ref_name, returncode=proc.returncode,
+                                 collection_error="missing per-test source evidence")
+            test_source = raw_sources
+            if any(not Path(path).is_relative_to(code_worktree.resolve())
+                   for paths in test_source.values() for path in paths):
+                return RunResult(ref=ref_name, returncode=proc.returncode,
+                                 collection_error="per-test source provenance mismatch")
         outcomes = []
         for nodeid, phases in data['tests'].items():
             # Setup/teardown errors must never count as a failing assertion.
@@ -240,12 +259,14 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                          source_verified=bool(imports) and not bad_imports,
                          failure_details=data.get("failure_details", {}), collected_counts=dict(collected),
                          collection_skips=data.get("collection_skips", []),
-                         runtime_skips=data.get("runtime_skips", []), deselected=data.get("deselected", []))
+                         runtime_skips=data.get("runtime_skips", []), deselected=data.get("deselected", []),
+                         test_source=test_source)
 
 
 def run_repeated_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                         targets: list[str], timeout: int, import_mode: str = "importlib",
-                        test_support: list[str] | None = None, repeats: int = 1) -> RunResult:
+                        test_support: list[str] | None = None, repeats: int = 1,
+                        per_test_source: bool = False) -> RunResult:
     """Repeat selected tests in fresh subprocesses, retaining all attempt evidence.
 
     Repeats share the same worktree. This detects observed instability, not all
@@ -254,19 +275,19 @@ def run_repeated_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
     if not 1 <= repeats <= 20:
         raise PrControlError("--repeats must be between 1 and 20")
     runs = [run_pytest(code_worktree, test_worktree, ref_name, targets, timeout,
-                       import_mode, test_support) for _ in range(repeats)]
+                       import_mode, test_support, per_test_source) for _ in range(repeats)]
     first = runs[0]
     evidence = []
     errors = []
     signature = lambda run: (sorted((o.nodeid, o.outcome) for o in run.outcomes),
                              run.collected_counts, run.source_verified,
-                             sorted(run.collection_skips), sorted(run.runtime_skips), sorted(run.deselected))
+                             sorted(run.collection_skips), sorted(run.runtime_skips), sorted(run.deselected), run.test_source)
     for attempt, run in enumerate(runs, 1):
         evidence.append({"attempt": attempt, "returncode": run.returncode,
                          "collection_error": run.collection_error,
                          "outcomes": [{"nodeid": o.nodeid, "outcome": o.outcome} for o in run.outcomes],
                          "collected_counts": run.collected_counts, "imports": run.imports,
-                         "source_verified": run.source_verified,
+                         "source_verified": run.source_verified, "test_source": run.test_source,
                          "failure_details": run.failure_details,
                          "collection_skips": run.collection_skips, "runtime_skips": run.runtime_skips,
                          "deselected": run.deselected})
@@ -282,7 +303,8 @@ def run_repeated_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                      collection_skips=sorted({n for r in runs for n in r.collection_skips}),
                      runtime_skips=sorted({n for r in runs for n in r.runtime_skips}),
                      attempts=evidence,
-                     deselected=sorted({n for r in runs for n in r.deselected}))
+                     deselected=sorted({n for r in runs for n in r.deselected}),
+                     test_source=first.test_source)
 
 
 def verdicts(base_run: RunResult, head_run: RunResult) -> list[dict]:
@@ -301,7 +323,11 @@ def verdicts(base_run: RunResult, head_run: RunResult) -> list[dict]:
         elif b == "error" or h == "error":
             verdict = "unrunnable"
         elif b == "failed" and h == "passed":
-            verdict = "fix_confirmed" if base_run.source_verified and head_run.source_verified else "transition_unverified_source"
+            verified = base_run.source_verified and head_run.source_verified
+            for run in (base_run, head_run):
+                if run.test_source is not None:
+                    verified = verified and bool(run.test_source.get(nodeid))
+            verdict = "fix_confirmed" if verified else "transition_unverified_source"
         elif b == "passed" and h == "passed":
             verdict = "passes_both"          # toothless as a fix control; fine as coverage
         elif b == "passed" and h == "failed":
