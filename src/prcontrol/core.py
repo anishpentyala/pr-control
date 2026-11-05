@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from collections import Counter
 from pathlib import Path
 
+from .probe_report import valid_probe_report
+
 TEST_PATH_RE = re.compile(r"(^|/)(tests?|spec)/.*\.(py|js|ts)$|(^|/)test_.*\.py$|.*(_test|\.test|\.spec)\.(py|js|ts)$", re.DOTALL)
 
 
@@ -198,6 +200,9 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
         except (OSError, ValueError):
             return RunResult(ref=ref_name, returncode=proc.returncode,
                              collection_error="pytest produced no valid report: " + (stderr or stdout)[-500:])
+        if not valid_probe_report(data, proc.returncode):
+            return RunResult(ref=ref_name, returncode=proc.returncode,
+                             collection_error="invalid probe report shape; outcomes and source evidence unavailable")
         outcomes = []
         for nodeid, phases in data['tests'].items():
             # Setup/teardown errors must never count as a failing assertion.
