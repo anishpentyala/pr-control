@@ -492,3 +492,21 @@ restored before the final snapshot is invisible; Git index metadata and nested
 submodule contents are not fully verified. It adds file hashing proportional
 to tracked content on every attempt and is not a sandbox. A reported transition
 still needs inspection of its intended defect witness.
+
+### Literal Git filenames
+
+Git path reads now decode raw output with the filesystem codec instead of
+text-mode newline translation. On supported filesystems, carriage returns and
+CRLF inside a tracked filename stay distinct from LF, so automatic test
+discovery and optional tracked-worktree snapshots use the actual path. Earlier
+versions preserved LF and Unicode names but could silently rewrite CR/CRLF.
+POSIX non-UTF-8 filename bytes also survive the Git discovery/snapshot APIs via
+filesystem decoding rather than raising a strict UTF-8 decode error.
+
+This does not promise every downstream pytest, terminal or report consumer can
+execute/display arbitrary byte filenames. Real CLI regression checks cover
+CR/CRLF test paths and tracked-file integrity; non-UTF-8 checks cover the local
+Git discovery/snapshot APIs only. Ordinary ref output and Git error handling
+remain text. Filenames are input data, not commands; existing subprocess
+argument lists and path checks remain unchanged. This is trusted-code local
+testing, not a security sandbox or proof of provenance.
