@@ -284,7 +284,7 @@ rewrite tracebacks can hide this distinction. Always inspect failure evidence.
   tamper-proof attestation: tests can change paths or falsify reports.
   Native extensions, editable installs, namespace packages and custom import
   hooks may need manual inspection. A failure-to-pass transition without
-  observed local-package imports is `transition_unverified_source`, never
+  observed local-package imports in the session is `transition_unverified_source`, never
   `fix_confirmed`.
 - Environment-dependent failures (GPUs, network, optional deps) show up as
   they are; pr-control reports outcomes, it does not judge them.
@@ -299,7 +299,10 @@ rewrite tracebacks can hide this distinction. Always inspect failure evidence.
   not its cause; the bounded traceback still needs manual inspection.
   An AssertionError inside unittest setup cannot be separated from its test
   body by this diagnostic; inspect the failure before drawing conclusions.
-- `fix_confirmed` is per-test evidence in one environment, not a global
+- Default source verification is session-wide: one test can import local source
+  while another only reads files. It does not prove each test executed that
+  source. Use the optional per-test call evidence below for a narrower gate.
+- `fix_confirmed` is an outcome transition in one environment, not a global
   verdict on the PR.
 
 ## License
@@ -404,3 +407,44 @@ These files have higher configuration priority in pytest9. A different file
 on either ref is rejected before tests are copied, rather than allowing a
 configuration-only difference to look like a source fix. The same conservative
 byte comparison applies even when an older pytest version would ignore them.
+
+## Optional per-test Python call evidence
+
+The default import-origin check is session-wide. A sibling test's import can
+therefore accompany a fail-to-pass transition that only reads a changed file.
+For trusted Python repositories, opt into a narrower additional gate:
+
+```sh
+pr-control . --base BASE --head HEAD --per-test-source --fail-on no-control
+```
+
+This profiles Python calls during each test's **call phase** and records paths
+whose module names match a detected local package/module. A transition becomes
+`fix_confirmed` only if both refs have ordinary session import verification
+and that test called at least one observed local production Python frame.
+Selected test files, conventional test directories/files, conftest, and
+pseudo-filenames such as `<string>` are excluded. Calls made only by pytest
+fixture setup/teardown do not count. `unittest.TestCase.setUp` and `tearDown`
+execute inside pytest's call phase and DO count, including when the test body
+itself makes no production call. This gate does not distinguish those unittest
+lifecycle calls from test-body calls. Existing outcome categories
+and the default behavior are unchanged. No source evidence means
+`transition_unverified_source`, not a failed test or a claim the test is useless.
+
+JSON records per-node paths under `runs[ref].test_source` and each repeated
+attempt. Duplicate occurrences all need evidence; an unobserved occurrence
+cannot borrow an earlier occurrence's calls. Repeats must retain matching path
+evidence. xdist sends call observations with test reports, not shared files.
+Markdown states when this gate is enabled. Root-level helper packages added
+with `--test-support` may also match detected local package names. Calls into
+head-only helpers outside the selected code worktree can conservatively abort
+the base run as a provenance mismatch; this is not proof of a production bug.
+
+This is deliberately conservative and adds profiling overhead. A constant read
+from an already imported module may execute no local function. Native extension
+calls, other threads and subprocess-only calls are not observed. An existing
+profiler is left alone; a replaced profiler discards the observation. Neither
+case can supply confirmation. Module names and filenames are diagnostic data,
+not an execution sandbox or tamper-proof proof: tests/plugins can fabricate
+reports, and a local call can still be irrelevant to the assertion. Inspect
+the failure witness and actual call paths before interpreting causality.

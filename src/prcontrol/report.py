@@ -29,6 +29,8 @@ def render_markdown(payload: dict) -> str:
         "| test | base | head | verdict |",
         "| --- | --- | --- | --- |",
     ]
+    if payload.get("per_test_source"):
+        lines[6:6] = ["- per-test source gate: observed local Python production calls during each test call phase; not causality or tamper-proof tracing", ""]
     if payload.get("test_overlay"):
         overlay = payload["test_overlay"]
         lines[6:6] = ["- explicit test overlay: " + overlay["scope"],

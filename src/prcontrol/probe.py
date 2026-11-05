@@ -7,6 +7,50 @@ import pytest
 from pathlib import Path
 
 _records = {}
+_test_source = {}
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_call(item):
+    if not os.environ.get("PR_CONTROL_TEST_SOURCE"):
+        yield
+        return
+    previous = sys.getprofile()
+    selected_tests = set(json.loads(os.environ["PR_CONTROL_SELECTED_TEST_FILES"]))
+    paths = set()
+    candidates = set(json.loads(os.environ["PR_CONTROL_PACKAGES"]))
+
+    def profile(frame, event, arg):
+        if event == "call":
+            name = frame.f_globals.get("__name__", "")
+            if isinstance(name, str) and name.split(".")[0] in candidates:
+                filename = frame.f_code.co_filename
+                # Generated code may claim a local module name but has no
+                # observed file origin. Never resolve <string> under cwd.
+                if filename.startswith("<") and filename.endswith(">"):
+                    return
+                path = Path(filename).resolve()
+                # Package-contained tests/helpers are not production-call evidence.
+                if (str(path) not in selected_tests
+                        and not any(part in {"test", "tests", "spec"} for part in path.parts)
+                        and not path.name.startswith("test_")
+                        and not path.name.endswith("_test.py")
+                        and path.name != "conftest.py"):
+                    paths.add(str(path))
+
+    # Do not replace another profiler or make incomplete traces look complete.
+    if previous is not None:
+        item.pr_control_test_source = []
+        yield
+        return
+    sys.setprofile(profile)
+    try:
+        yield
+    finally:
+        changed = sys.getprofile() is not profile
+        sys.setprofile(previous)
+        item.pr_control_test_source = [] if changed else sorted(paths)
+
 _collection_errors = []
 _failure_details = {}
 _collected = []
@@ -25,6 +69,8 @@ _worker_deselected = []
 def pytest_runtest_makereport(item, call):
     outcome = yield
     report = outcome.get_result()
+    if report.when == "call" and os.environ.get("PR_CONTROL_TEST_SOURCE"):
+        report.pr_control_test_source = getattr(item, "pr_control_test_source", [])
     # unittest setUp/tearDown run inside pytest's call phase. An unexpected
     # exception there is not a regression assertion. Conservatively classify
     # unexpected exceptions as execution errors. pytest.fail.Exception also
@@ -53,6 +99,13 @@ def pytest_runtest_makereport(item, call):
 
 
 def pytest_runtest_logreport(report):
+    if report.when == "call" and os.environ.get("PR_CONTROL_TEST_SOURCE"):
+        # Duplicate node occurrences all need local call evidence. An empty
+        # occurrence cannot borrow observations from an earlier occurrence.
+        paths = getattr(report, "pr_control_test_source", [])
+        old = _test_source.get(report.nodeid)
+        _test_source[report.nodeid] = ([] if old == [] or not paths
+                                      else sorted(set((old or []) + paths)))
     if report.skipped:
         _runtime_skips.append(report.nodeid)
     row = _records.setdefault(report.nodeid, {})
@@ -148,7 +201,7 @@ def pytest_sessionfinish(session, exitstatus):
         imports[name] = sorted(set(imports.get(name, []) + paths))
     errors = _collection_errors + [{"nodeid": "xdist", "error": value} for value in _worker_errors]
     Path(os.environ['PR_CONTROL_REPORT']).write_text(json.dumps({
-        'tests': _records, 'failure_details': _failure_details, 'collection_errors': errors,
+        'test_source': _test_source, 'tests': _records, 'failure_details': _failure_details, 'collection_errors': errors,
         'imports': imports, 'exitstatus': int(exitstatus),
         'collected': _collected, 'finished': _finished,
         'collection_skips': sorted(set(_collection_skips + _worker_skips)),

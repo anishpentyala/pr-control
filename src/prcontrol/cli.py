@@ -59,6 +59,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="exit 1 if pytest reports deselected tests on either ref; default permits and reports selection filtering")
     p.add_argument("--require-no-skips", action="store_true",
                    help="exit 1 if either side skips a selected test; default permits and reports skips")
+    p.add_argument("--per-test-source", action="store_true",
+                   help="require observed local Python call frames within each test call before confirming its transition; opt-in profiling")
     p.add_argument("--json-out", type=Path, default=None, help="write the JSON report here")
     p.add_argument("--md-out", type=Path, default=None, help="write the Markdown report here")
     p.add_argument(
@@ -117,13 +119,14 @@ def main(argv: list[str] | None = None) -> int:
                        "fixtures": args.overlay_fixture,
                        "scope": "selected head tests and explicit fixtures in disposable selected-code trees; not an untouched baseline"}
             base_tests = base_wt
-        base_run = run_repeated_pytest(base_wt, base_tests, "base", targets, args.timeout, args.import_mode, args.test_support, args.repeats)
-        head_run = run_repeated_pytest(head_wt, head_wt, "head", targets, args.timeout, args.import_mode, args.test_support, args.repeats)
+        base_run = run_repeated_pytest(base_wt, base_tests, "base", targets, args.timeout, args.import_mode, args.test_support, args.repeats, args.per_test_source)
+        head_run = run_repeated_pytest(head_wt, head_wt, "head", targets, args.timeout, args.import_mode, args.test_support, args.repeats, args.per_test_source)
         rows = verdicts(base_run, head_run)
         summary = Counter(r["verdict"] for r in rows)
         payload = {
             "repo": str(repo),
             "repeats": args.repeats,
+            "per_test_source": args.per_test_source,
             "collection_errors": {
                 r.ref: r.collection_error for r in (base_run, head_run) if r.collection_error
             },
@@ -133,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
             "test_support": args.test_support,
             "require_no_skips": args.require_no_skips,
             "require_no_deselections": args.require_no_deselections,
-            "runs": {r.ref: {"returncode": r.returncode, "imports": r.imports, "source_verified": r.source_verified, "collected_counts": r.collected_counts, "collection_skips": r.collection_skips, "runtime_skips": r.runtime_skips, "deselected": r.deselected, "attempts": r.attempts} for r in (base_run, head_run)},
+            "runs": {r.ref: {"returncode": r.returncode, "imports": r.imports, "source_verified": r.source_verified, "test_source": r.test_source, "collected_counts": r.collected_counts, "collection_skips": r.collection_skips, "runtime_skips": r.runtime_skips, "deselected": r.deselected, "attempts": r.attempts} for r in (base_run, head_run)},
             "env": env_fingerprint(),
             "verdicts": rows,
             "summary": dict(summary),
