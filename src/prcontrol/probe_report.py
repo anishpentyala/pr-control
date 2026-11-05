@@ -57,6 +57,13 @@ def valid_probe_report(data, returncode):
         if (not isinstance(name, str) or not _strings(paths) or not paths
                 or any(not Path(path).is_absolute() for path in paths)):
             return False
+    sources = data.get("test_source", {})
+    if not isinstance(sources, dict) or any(
+        not isinstance(node, str) or not _strings(paths)
+        or any(not Path(path).is_absolute() for path in paths)
+        for node, paths in sources.items()
+    ):
+        return False
     details = data.get('failure_details', {})
     if not isinstance(details, dict):
         return False
