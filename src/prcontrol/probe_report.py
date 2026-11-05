@@ -41,6 +41,16 @@ def valid_probe_report(data, returncode):
     for key in ('collected', 'finished'):
         if not _strings(data.get(key)):
             return False
+    # Every finished test needs an outcome. Crashed/interrupted tests may
+    # have partial phase records without a logfinish event on nonzero exits.
+    # Multiplicity remains in the lists for the controller to check.
+    finished = set(data['finished'])
+    if not finished.issubset(tests):
+        return False
+    if returncode == 0 and set(tests) != finished:
+        return False
+    if not set(tests).issubset(data['collected']):
+        return False
     for key in ('collection_skips', 'runtime_skips', 'deselected'):
         if not _strings(data.get(key, [])):
             return False
@@ -64,8 +74,12 @@ def valid_probe_report(data, returncode):
         for node, paths in sources.items()
     ):
         return False
+    if not set(sources).issubset(tests):
+        return False
     details = data.get('failure_details', {})
     if not isinstance(details, dict):
+        return False
+    if not set(details).issubset(tests):
         return False
     for node, failures in details.items():
         if not isinstance(node, str) or not isinstance(failures, list):
