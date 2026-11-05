@@ -466,3 +466,29 @@ evidence. This bounds cache entries, not total profiler/report memory, and
 profiling overhead still depends on the workload. Cache lookup and setup can
 cost time on cold or unique-call workloads; repeated-call improvements are not
 a guarantee that every workload becomes faster.
+
+### Optional tracked-worktree integrity policy
+
+`--require-clean-worktrees` snapshots tracked files in both selected source and
+head-test worktrees before and after each pytest attempt. Persistent content,
+symlink-target, executable-mode, deletion or staged-path changes make the run
+incomplete and discard its outcomes/source evidence. Untracked scratch files
+are allowed. The baseline is taken after an explicit test overlay, so that
+approved setup is not called test-time mutation. JSON and Markdown record the
+policy. A snapshot I/O or Git-listing failure also makes the attempt incomplete,
+discards outcomes/source evidence, and records a generic error without exception
+text or filenames. This does not redact other report fields or pytest output.
+Default off preserves experiments that intentionally rewrite fixtures.
+
+Only paths listed in each tree's Git index are guarded. An overlaid head test
+or fixture that did not exist in the base index remains untracked on base, so
+its base-side copy is **not guarded**. The original tracked head-side file is
+checked only when that tree participates in the attempt; with overlay, the
+base attempt checks only the base tree. Use ordinary (non-overlay) mode if the
+tracked original head-test tree must be checked during the base attempt.
+
+This is trusted-code before/after checking, not tamper-proof tracing. A change
+restored before the final snapshot is invisible; Git index metadata and nested
+submodule contents are not fully verified. It adds file hashing proportional
+to tracked content on every attempt and is not a sandbox. A reported transition
+still needs inspection of its intended defect witness.
