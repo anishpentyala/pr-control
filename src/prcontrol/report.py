@@ -29,6 +29,8 @@ def render_markdown(payload: dict) -> str:
         "| test | base | head | verdict |",
         "| --- | --- | --- | --- |",
     ]
+    if payload.get("require_clean_worktrees"):
+        lines[6:6] = ["- tracked-file integrity policy: before/after each attempt; untracked scratch allowed; not tamper-proof", ""]
     if payload.get("per_test_source"):
         lines[6:6] = ["- per-test source gate: observed local Python production calls during each test call phase; not causality or tamper-proof tracing", ""]
     if payload.get("test_overlay"):

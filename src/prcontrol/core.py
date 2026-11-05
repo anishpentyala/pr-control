@@ -10,6 +10,8 @@ regressions introduced by the PR.
 from __future__ import annotations
 
 import json
+import hashlib
+import stat
 import os
 import platform
 import re
@@ -126,9 +128,42 @@ def _package_names(worktree: Path) -> set[str]:
     return names
 
 
+def _tracked_snapshot(worktree: Path):
+    """Content/mode snapshot of tracked paths, including staged additions.
+
+    An opt-in trusted-code check, not tamper-proof: changes restored before
+    the post-run snapshot are invisible. Untracked scratch files are excluded.
+    """
+    names = _git(worktree, "ls-files", "-z", strip=False).split("\0")
+    snapshot = {}
+    for name in names:
+        if not name:
+            continue
+        path = worktree / name
+        try:
+            mode = path.lstat().st_mode
+            if stat.S_ISLNK(mode):
+                content = os.fsencode(os.readlink(path))
+            elif stat.S_ISREG(mode):
+                hasher = hashlib.sha256()
+                with path.open("rb") as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        hasher.update(chunk)
+                content = None
+            else:
+                # Submodules/directories are not inspected recursively.
+                content = b""
+            snapshot[name] = (stat.S_IFMT(mode), bool(mode & stat.S_IXUSR),
+                              hasher.hexdigest() if content is None else hashlib.sha256(content).hexdigest())
+        except FileNotFoundError:
+            snapshot[name] = None
+    return snapshot
+
+
 def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                targets: list[str], timeout: int, import_mode: str = "importlib",
-               test_support: list[str] | None = None, per_test_source: bool = False) -> RunResult:
+               test_support: list[str] | None = None, per_test_source: bool = False,
+               require_clean_worktrees: bool = False) -> RunResult:
     """Run head tests against selected source and inspect imported file origins.
 
     Tests and plugins can override imports or falsify reports. This is a
@@ -168,6 +203,14 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
         ])
         cmd = [sys.executable, "-m", "pytest", *abs_targets, "-q", "-p", "pr_control_probe",
                "-p", "no:cacheprovider", "--rootdir", str(test_worktree), "--import-mode", import_mode]
+        checked_trees = list(dict.fromkeys((code_worktree, test_worktree)))
+        try:
+            before = ([_tracked_snapshot(tree) for tree in checked_trees]
+                      if require_clean_worktrees else None)
+        except (OSError, PrControlError):
+            # Neither exception text nor filenames belong in this diagnostic.
+            return RunResult(ref=ref_name, returncode=-1,
+                             collection_error="tracked worktree snapshot unavailable before pytest; outcomes and source evidence unavailable")
         proc = None
         try:
             proc = subprocess.Popen(
@@ -203,6 +246,15 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                     proc.kill()
                 proc.wait()
             raise
+        if before is not None:
+            try:
+                after = [_tracked_snapshot(tree) for tree in checked_trees]
+            except (OSError, PrControlError):
+                return RunResult(ref=ref_name, returncode=proc.returncode,
+                                 collection_error="tracked worktree snapshot unavailable after pytest; outcomes and source evidence unavailable")
+            if after != before:
+                return RunResult(ref=ref_name, returncode=proc.returncode,
+                                 collection_error="tracked worktree changed during pytest; outcomes and source evidence unavailable")
         try:
             def unique_object(pairs):
                 value = {}
@@ -275,7 +327,8 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
 def run_repeated_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                         targets: list[str], timeout: int, import_mode: str = "importlib",
                         test_support: list[str] | None = None, repeats: int = 1,
-                        per_test_source: bool = False) -> RunResult:
+                        per_test_source: bool = False,
+                        require_clean_worktrees: bool = False) -> RunResult:
     """Repeat selected tests in fresh subprocesses, retaining all attempt evidence.
 
     Repeats share the same worktree. This detects observed instability, not all
@@ -284,7 +337,7 @@ def run_repeated_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
     if not 1 <= repeats <= 20:
         raise PrControlError("--repeats must be between 1 and 20")
     runs = [run_pytest(code_worktree, test_worktree, ref_name, targets, timeout,
-                       import_mode, test_support, per_test_source) for _ in range(repeats)]
+                       import_mode, test_support, per_test_source, require_clean_worktrees) for _ in range(repeats)]
     first = runs[0]
     evidence = []
     errors = []

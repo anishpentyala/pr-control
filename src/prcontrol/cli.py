@@ -59,6 +59,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="exit 1 if pytest reports deselected tests on either ref; default permits and reports selection filtering")
     p.add_argument("--require-no-skips", action="store_true",
                    help="exit 1 if either side skips a selected test; default permits and reports skips")
+    p.add_argument("--require-clean-worktrees", action="store_true",
+                   help="fail if tracked file contents or modes change during a pytest attempt; untracked scratch files are permitted")
     p.add_argument("--per-test-source", action="store_true",
                    help="require observed local Python call frames within each test call before confirming its transition; opt-in profiling")
     p.add_argument("--json-out", type=Path, default=None, help="write the JSON report here")
@@ -119,14 +121,15 @@ def main(argv: list[str] | None = None) -> int:
                        "fixtures": args.overlay_fixture,
                        "scope": "selected head tests and explicit fixtures in disposable selected-code trees; not an untouched baseline"}
             base_tests = base_wt
-        base_run = run_repeated_pytest(base_wt, base_tests, "base", targets, args.timeout, args.import_mode, args.test_support, args.repeats, args.per_test_source)
-        head_run = run_repeated_pytest(head_wt, head_wt, "head", targets, args.timeout, args.import_mode, args.test_support, args.repeats, args.per_test_source)
+        base_run = run_repeated_pytest(base_wt, base_tests, "base", targets, args.timeout, args.import_mode, args.test_support, args.repeats, args.per_test_source, args.require_clean_worktrees)
+        head_run = run_repeated_pytest(head_wt, head_wt, "head", targets, args.timeout, args.import_mode, args.test_support, args.repeats, args.per_test_source, args.require_clean_worktrees)
         rows = verdicts(base_run, head_run)
         summary = Counter(r["verdict"] for r in rows)
         payload = {
             "repo": str(repo),
             "repeats": args.repeats,
             "per_test_source": args.per_test_source,
+            "require_clean_worktrees": args.require_clean_worktrees,
             "collection_errors": {
                 r.ref: r.collection_error for r in (base_run, head_run) if r.collection_error
             },
