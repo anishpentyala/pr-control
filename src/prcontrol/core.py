@@ -69,11 +69,15 @@ class PrControlError(RuntimeError):
 
 def _git(repo: Path, *args: str, strip: bool = True) -> str:
     proc = subprocess.run(
-        ["git", *args], cwd=repo, capture_output=True, text=True
+        ["git", *args], cwd=repo, capture_output=True
     )
+    # Git's -z output contains literal filesystem names. Text-mode pipes
+    # normalize CR/CRLF to LF and strict UTF-8 rejects valid POSIX byte names.
+    # Decode with the filesystem codec without newline translation instead.
+    stdout, stderr = os.fsdecode(proc.stdout), os.fsdecode(proc.stderr)
     if proc.returncode != 0:
-        raise PrControlError(f"git {' '.join(args)} failed: {proc.stderr.strip()[:300]}")
-    return proc.stdout.strip() if strip else proc.stdout
+        raise PrControlError(f"git {' '.join(args)} failed: {stderr.strip()[:300]}")
+    return stdout.strip() if strip else stdout
 
 
 def check_repo(repo: Path, base: str, head: str) -> tuple[str, str]:
