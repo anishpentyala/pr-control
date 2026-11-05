@@ -193,7 +193,13 @@ Per changed test:
 | `missing_on_head` | - | - | test collected on base but not head |
 
 Plus a same-suite diff: failures that appeared on head, and failures that
-disappeared. A nonzero pytest session exit without recorded failures, or a zero exit despite recorded failures, is incomplete. An incomplete run, execution error or different collected test set is labeled
+disappeared. Malformed or incompatible probe report shapes fail closed as incomplete runs
+before outcomes or import paths are used. Required report fields, phase/status
+values, absolute import paths, and consumed optional evidence fields are
+checked. Unknown extra fields remain compatible. This checks readability, not
+authenticity: tests and plugins can still fabricate a well-shaped report.
+
+A nonzero pytest session exit without recorded failures, or a zero exit despite recorded failures, is incomplete. An incomplete run, execution error or different collected test set is labeled
 and exits 1 even with `--fail-on never`. Same-suite completeness requires every selected test to finish in each run,
 and both runs to produce the same test IDs with the same occurrence counts,
 without execution errors. A collection hook that repeats a test on just one
