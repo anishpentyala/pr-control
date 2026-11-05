@@ -149,6 +149,9 @@ def test_optional_paths_are_shape_checked():
             'collected': [], 'finished': [], 'test_source': {'test_a': [False]}}
     assert not valid_probe_report(data, 0)
     data['test_source'] = {'test_a': ['/tmp/calc.py']}
+    assert not valid_probe_report(data, 0)  # no outcome exists for this source key
+    data.update(tests={'test_a': {'call': 'passed'}},
+                collected=['test_a'], finished=['test_a'])
     assert valid_probe_report(data, 0)
 
 

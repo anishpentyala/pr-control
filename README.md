@@ -196,7 +196,12 @@ Plus a same-suite diff: failures that appeared on head, and failures that
 disappeared. Malformed or incompatible probe report shapes fail closed as incomplete runs
 before outcomes or import paths are used. Required report fields, phase/status
 values, absolute import paths, and consumed optional evidence fields are
-checked. Unknown extra fields remain compatible. This checks readability, not
+checked. Finished tests must have outcome records; outcomes must belong to
+the collected suite. A successful session must have exactly the finished test
+identities, and optional per-test source and failure detail keys must refer to
+recorded outcomes. Nonzero exits may retain unfinished partial phase records
+so worker-crash and interruption diagnostics remain available. Unknown extra
+fields remain compatible. These checks cover readability and consistency, not
 authenticity: tests and plugins can still fabricate a well-shaped report.
 
 A nonzero pytest session exit without recorded failures, or a zero exit despite recorded failures, is incomplete. An incomplete run, execution error or different collected test set is labeled
