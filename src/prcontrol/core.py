@@ -478,7 +478,7 @@ def load_failure_witnesses(path: Path) -> dict[str, str]:
 
     try:
         data = json.loads(path.read_text(), object_pairs_hook=unique_object)
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, RecursionError) as exc:
         raise PrControlError(f"cannot read base failure witnesses: {exc}") from exc
     if not isinstance(data, dict) or not data:
         raise PrControlError("base failure witnesses must be a nonempty JSON object")
