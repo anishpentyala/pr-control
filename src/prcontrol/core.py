@@ -292,6 +292,9 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             # Setup/teardown errors must never count as a failing assertion.
             outcome = ('error' if phases.get('setup') == 'failed' or phases.get('teardown') == 'failed'
                        else 'error' if 'error' in phases.values()
+                       # A teardown skip must not erase a recorded assertion.
+                       # Skip policy still sees the separate runtime evidence.
+                       else 'failed' if phases.get('call') == 'failed'
                        else 'skipped' if 'skipped' in phases.values()
                        else phases.get('call', 'skipped'))
             outcomes.append(TestOutcome(nodeid=nodeid, outcome=outcome))
@@ -393,7 +396,12 @@ def verdicts(base_run: RunResult, head_run: RunResult) -> list[dict]:
             for run in (base_run, head_run):
                 if run.test_source is not None:
                     verified = verified and bool(run.test_source.get(nodeid))
-            verdict = "fix_confirmed" if verified else "transition_unverified_source"
+            if nodeid in base_run.runtime_skips or nodeid in head_run.runtime_skips:
+                # Preserve failed assertions for regression accounting, without
+                # promoting an incompletely executed lifecycle into a control.
+                verdict = "transition_with_skips"
+            else:
+                verdict = "fix_confirmed" if verified else "transition_unverified_source"
         elif b == "passed" and h == "passed":
             verdict = "passes_both"          # toothless as a fix control; fine as coverage
         elif b == "passed" and h == "failed":
