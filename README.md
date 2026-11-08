@@ -105,6 +105,17 @@ own subprocess-driven tests can run with `--test-support tests`, but their
 outcome transitions stay `transition_unverified_source` rather than being
 upgraded to `fix_confirmed`.
 
+### Failure and skip precedence
+
+A test-call assertion failure remains a failure when teardown also skips.
+Setup/teardown errors still take precedence, and a passing call with a skip
+still reports a skip. Runtime skip evidence is retained separately even when
+a call failure wins the aggregate outcome, so `--require-no-skips` still fails
+that run. A failed-to-passed transition with a recorded runtime skip is
+`transition_with_skips`, never `fix_confirmed`, so `--fail-on no-control` still
+rejects it. This prevents a teardown skip from hiding a new assertion failure
+from `--fail-on regression`; it does not prove that an assertion caused a fix.
+
 ## Tests inside the source package
 
 Some projects put tests and fixtures under the importable source package, such
