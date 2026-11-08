@@ -542,7 +542,9 @@ def test_teardown_skip_cannot_confirm_a_fix(make_repo, skip_side):
     assert proc.returncode != 0
     assert not data['summary'].get('fix_confirmed', 0)
     skipped_ref = 'head' if skip_side == 'head' else 'base'
-    assert data['verdicts'][0][skipped_ref] == 'skipped'
+    assert data['verdicts'][0][skipped_ref] == ('skipped' if skipped_ref == 'head' else 'failed')
+    if skip_side == 'base':
+        assert data['verdicts'][0]['verdict'] == 'transition_with_skips'
 
 
 def test_teardown_skip_does_not_become_passing_coverage(make_repo):

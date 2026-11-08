@@ -130,5 +130,6 @@ def render_markdown(payload: dict) -> str:
         f"- inconclusive: {summary.get('inconclusive', 0)}",
         f"- unrunnable: {summary.get('unrunnable', 0)}",
         f"- transition_unverified_source: {summary.get('transition_unverified_source', 0)}",
+        f"- transition_with_skips: {summary.get('transition_with_skips', 0)}",
     ]
     return "\n".join(lines) + "\n"
