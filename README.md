@@ -525,3 +525,17 @@ Git discovery/snapshot APIs only. Ordinary ref output and Git error handling
 remain text. Filenames are input data, not commands; existing subprocess
 argument lists and path checks remain unchanged. This is trusted-code local
 testing, not a security sandbox or proof of provenance.
+
+
+### Pytest retry reports
+
+When pytest-rerunfailures emits a `rerun` report, pr-control retains it as an
+execution error and saves its failure detail. A later passing report cannot
+erase that retry or establish a clean control. The comparison remains
+incomplete, whether retries eventually pass or exhaust their limit. Tests
+marked for retries that pass on their first attempt keep their normal outcome.
+
+This prevents retry reports from crashing the probe; it is not general retry
+plugin support or a replacement for `--repeats`. In particular, custom plugin
+exit statuses such as pytest-rerunfailures' `--fail-on-flaky` exit 7 remain
+unsupported and fail closed.

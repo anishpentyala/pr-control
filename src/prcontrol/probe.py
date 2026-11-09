@@ -121,13 +121,21 @@ def pytest_runtest_logreport(report):
     if report.skipped:
         _runtime_skips.append(report.nodeid)
     row = _records.setdefault(report.nodeid, {})
-    status = "error" if getattr(report, "pr_control_execution_error", False) else report.outcome
+    # pytest-rerunfailures emits a distinct interim outcome. Keep retry
+    # evidence as an execution error, even if a later report passes. Retried
+    # tests are not clean controls and must not crash outcome aggregation.
+    retried = report.outcome == "rerun"
+    status = (
+        "error"
+        if retried or getattr(report, "pr_control_execution_error", False)
+        else report.outcome
+    )
     if report.failed and hasattr(report, "context"):
         # Subtest reports share the parent nodeid. Conservatively preserve
         # their failure as an error instead of allowing a later parent-pass
         # report to overwrite it. Detailed subtest attribution is unsupported.
         status = "error"
-    if report.failed:
+    if report.failed or retried:
         _failure_details.setdefault(report.nodeid, []).append({
             "phase": report.when,
             "classification": status,
