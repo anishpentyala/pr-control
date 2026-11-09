@@ -231,6 +231,10 @@ Markdown to stdout by default; `--json-out report.json` and
 `--md-out report.md` write files. Every report carries the environment
 fingerprint (python/pytest/platform) and the exact refs. Failed tests include
 phase, classification and a bounded traceback for manual interpretation.
+Markdown wraps traceback and incomplete-run diagnostics in adaptive fences longer
+than their literal backtick runs. Diagnostic text is preserved rather than
+rewritten, and embedded fences cannot become report headings. This is report
+formatting, not a sandbox or validation of diagnostic contents.
 Non-text bytes written by tests to stdout/stderr are decoded with replacement
 characters for diagnostics. They cannot change the structured pytest verdict;
 a missing report or timeout remains incomplete.

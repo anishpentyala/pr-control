@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import html
+import re
 
 
 def _inline(value: str) -> str:
@@ -11,6 +12,19 @@ def _inline(value: str) -> str:
     return "<code>" + (html.escape(str(value), quote=False).replace("`", "&#96;")
             .replace("|", "&#124;").replace("\r", r"\r").replace("\n", r"\n")
             .replace("\t", r"\t")) + "</code>"
+
+
+def _code_block(value: str) -> list[str]:
+    """Keep diagnostic text literal and inside its own Markdown code block.
+
+    Longer source fences must not close the report's fence. Choose a delimiter
+    longer than every backtick run in the text instead of altering evidence.
+    This contains Markdown structure, not terminal controls or adversarial code.
+    """
+    text = str(value)
+    width = max((len(match.group()) for match in re.finditer(r"`+", text)), default=0)
+    fence = "`" * max(3, width + 1)
+    return [fence + "text", text, fence]
 
 
 def render_json(payload: dict) -> str:
@@ -85,8 +99,8 @@ def render_markdown(payload: dict) -> str:
             lines += ["", f"### {_inline(row['test'])}"]
             for ref in ("base", "head"):
                 for failure in row.get(f"{ref}_failure_details", []):
-                    lines += ["", f"{ref}: {failure['phase']} / {failure['classification']}", "", "```text",
-                              failure['traceback'].replace("```", "~~~"), "```"]
+                    lines += ["", f"{ref}: {failure['phase']} / {failure['classification']}", ""]
+                    lines += _code_block(failure['traceback'])
     sd = payload["suite_diff"]
     lines += [
         "",
@@ -107,7 +121,8 @@ def render_markdown(payload: dict) -> str:
         lines += ["", "### New failures on head", ""]
         lines += [f"- {_inline(t)}" for t in sd["new_failures_on_head"]]
     for ref, error in payload.get("collection_errors", {}).items():
-        lines += ["", f"### {ref}: incomplete run", "", "```", str(error), "```"]
+        lines += ["", f"### {ref}: incomplete run", ""]
+        lines += _code_block(error)
     if payload.get("test_overlay"):
         lines += ["", "## Test overlay manifest", "",
                   "Production source paths remain verified; selected test/fixture bytes are explicitly replaced."]
