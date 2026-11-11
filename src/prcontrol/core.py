@@ -164,10 +164,37 @@ def _tracked_snapshot(worktree: Path):
     return snapshot
 
 
+def _overlay_snapshot(inputs):
+    """Snapshot only explicit overlay inputs, including untracked copied files.
+
+    checked() refuses changed symlink paths before any contents are read. This
+    is trusted-code before/after checking, not concurrent-edit protection.
+    """
+    from .overlay import checked
+    result = {}
+    for tree, names in inputs:
+        files = {}
+        for name in names:
+            path = checked(tree, name)
+            try:
+                mode = path.lstat().st_mode
+                if not stat.S_ISREG(mode):
+                    raise ValueError("overlay input is not a regular file")
+                hasher = hashlib.sha256()
+                with path.open("rb") as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        hasher.update(chunk)
+                files[name] = (stat.S_IFMT(mode), bool(mode & stat.S_IXUSR), hasher.hexdigest())
+            except FileNotFoundError:
+                files[name] = None
+        result[str(tree)] = files
+    return result
+
+
 def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                targets: list[str], timeout: int, import_mode: str = "importlib",
                test_support: list[str] | None = None, per_test_source: bool = False,
-               require_clean_worktrees: bool = False) -> RunResult:
+               require_clean_worktrees: bool = False, overlay_inputs=()) -> RunResult:
     """Run head tests against selected source and inspect imported file origins.
 
     Tests and plugins can override imports or falsify reports. This is a
@@ -215,7 +242,17 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             # Neither exception text nor filenames belong in this diagnostic.
             return RunResult(ref=ref_name, returncode=-1,
                              collection_error="tracked worktree snapshot unavailable before pytest; outcomes and source evidence unavailable")
+        try:
+            overlay_before = _overlay_snapshot(overlay_inputs) if overlay_inputs else None
+            if overlay_before is not None and any(
+                value is None for files in overlay_before.values() for value in files.values()
+            ):
+                raise ValueError("overlay input is missing before pytest")
+        except (OSError, ValueError):
+            return RunResult(ref=ref_name, returncode=-1,
+                             collection_error="overlay input snapshot unavailable before pytest; outcomes and source evidence unavailable")
         proc = None
+        timed_out = False
         try:
             proc = subprocess.Popen(
                 cmd, cwd=code_worktree, env=env, stdout=subprocess.PIPE,
@@ -233,8 +270,7 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
             else:
                 proc.kill()
             proc.wait()
-            return RunResult(ref=ref_name, returncode=-1,
-                             collection_error=f"pytest timed out after {timeout}s")
+            timed_out = True
         except BaseException:
             # A caller interrupt or pipe-read failure must not abandon the
             # separately started pytest session while worktrees are removed.
@@ -250,15 +286,31 @@ def run_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                     proc.kill()
                 proc.wait()
             raise
+        # Even after a timeout, check input integrity once cleanup has ended.
+        # Otherwise a deleted overlay can escape into the next repeat/head run.
+        timeout_detail = f"; pytest timed out after {timeout}s" if timed_out else ""
+        result_code = -1 if timed_out else proc.returncode
+        if overlay_before is not None:
+            try:
+                overlay_after = _overlay_snapshot(overlay_inputs)
+            except (OSError, ValueError):
+                return RunResult(ref=ref_name, returncode=result_code,
+                                 collection_error="overlay input snapshot unavailable after pytest; outcomes and source evidence unavailable" + timeout_detail)
+            if overlay_after != overlay_before:
+                return RunResult(ref=ref_name, returncode=result_code,
+                                 collection_error="overlay input changed during pytest; outcomes and source evidence unavailable" + timeout_detail)
         if before is not None:
             try:
                 after = [_tracked_snapshot(tree) for tree in checked_trees]
             except (OSError, PrControlError):
-                return RunResult(ref=ref_name, returncode=proc.returncode,
-                                 collection_error="tracked worktree snapshot unavailable after pytest; outcomes and source evidence unavailable")
+                return RunResult(ref=ref_name, returncode=result_code,
+                                 collection_error="tracked worktree snapshot unavailable after pytest; outcomes and source evidence unavailable" + timeout_detail)
             if after != before:
-                return RunResult(ref=ref_name, returncode=proc.returncode,
-                                 collection_error="tracked worktree changed during pytest; outcomes and source evidence unavailable")
+                return RunResult(ref=ref_name, returncode=result_code,
+                                 collection_error="tracked worktree changed during pytest; outcomes and source evidence unavailable" + timeout_detail)
+        if timed_out:
+            return RunResult(ref=ref_name, returncode=-1,
+                             collection_error=f"pytest timed out after {timeout}s")
         try:
             def unique_object(pairs):
                 value = {}
@@ -335,7 +387,7 @@ def run_repeated_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
                         targets: list[str], timeout: int, import_mode: str = "importlib",
                         test_support: list[str] | None = None, repeats: int = 1,
                         per_test_source: bool = False,
-                        require_clean_worktrees: bool = False) -> RunResult:
+                        require_clean_worktrees: bool = False, overlay_inputs=()) -> RunResult:
     """Repeat selected tests in fresh subprocesses, retaining all attempt evidence.
 
     Repeats share the same worktree. This detects observed instability, not all
@@ -343,8 +395,15 @@ def run_repeated_pytest(code_worktree: Path, test_worktree: Path, ref_name: str,
     """
     if not 1 <= repeats <= 20:
         raise PrControlError("--repeats must be between 1 and 20")
-    runs = [run_pytest(code_worktree, test_worktree, ref_name, targets, timeout,
-                       import_mode, test_support, per_test_source, require_clean_worktrees) for _ in range(repeats)]
+    runs = []
+    for _ in range(repeats):
+        run = run_pytest(code_worktree, test_worktree, ref_name, targets, timeout,
+                         import_mode, test_support, per_test_source, require_clean_worktrees, overlay_inputs)
+        runs.append(run)
+        if overlay_inputs and run.collection_error and run.collection_error.startswith("overlay input"):
+            # Do not repeat a run against an input already observed as changed,
+            # deleted or unreadable. The retained attempt remains incomplete.
+            break
     first = runs[0]
     evidence = []
     errors = []

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .core import (
     PrControlError,
+    RunResult,
     load_failure_witnesses,
     check_failure_witnesses,
     changed_test_files,
@@ -61,6 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="exit 1 if either side skips a selected test; default permits and reports skips")
     p.add_argument("--require-clean-worktrees", action="store_true",
                    help="fail if tracked file contents or modes change during a pytest attempt; untracked scratch files are permitted")
+    p.add_argument("--require-clean-overlays", action="store_true",
+                   help="with --overlay-tests, reject changes to explicit copied tests/fixtures and their original head inputs; other untracked scratch remains allowed")
     p.add_argument("--per-test-source", action="store_true",
                    help="require observed local Python call frames within each test call before confirming its transition; opt-in profiling")
     p.add_argument("--json-out", type=Path, default=None, help="write the JSON report here")
@@ -84,6 +87,8 @@ def main(argv: list[str] | None = None) -> int:
             raise PrControlError("--timeout must be positive")
         if args.targets == []:
             raise PrControlError("--targets needs at least one target")
+        if args.require_clean_overlays and not args.overlay_tests:
+            raise PrControlError("--require-clean-overlays requires --overlay-tests")
         if args.overlay_fixture and not args.overlay_tests:
             raise PrControlError("--overlay-fixture requires --overlay-tests")
         if args.overlay_tests and args.test_support:
@@ -121,8 +126,21 @@ def main(argv: list[str] | None = None) -> int:
                        "fixtures": args.overlay_fixture,
                        "scope": "selected head tests and explicit fixtures in disposable selected-code trees; not an untouched baseline"}
             base_tests = base_wt
-        base_run = run_repeated_pytest(base_wt, base_tests, "base", targets, args.timeout, args.import_mode, args.test_support, args.repeats, args.per_test_source, args.require_clean_worktrees)
-        head_run = run_repeated_pytest(head_wt, head_wt, "head", targets, args.timeout, args.import_mode, args.test_support, args.repeats, args.per_test_source, args.require_clean_worktrees)
+        overlay_inputs = ()
+        if args.require_clean_overlays:
+            names = tuple(row["path"] for row in overlay["files"]["head"])
+            overlay_inputs = ((base_wt, names), (head_wt, names))
+        base_run = run_repeated_pytest(base_wt, base_tests, "base", targets, args.timeout, args.import_mode, args.test_support, args.repeats, args.per_test_source, args.require_clean_worktrees, overlay_inputs)
+        overlay_failed = args.require_clean_overlays and any(
+            (attempt["collection_error"] or "").startswith("overlay input")
+            for attempt in base_run.attempts
+        )
+        if overlay_failed:
+            head_run = RunResult(ref="head", returncode=-1,
+                                 collection_error="head not run because base overlay input integrity was unavailable or changed")
+        else:
+            head_run = run_repeated_pytest(head_wt, head_wt, "head", targets, args.timeout, args.import_mode, args.test_support, args.repeats, args.per_test_source, args.require_clean_worktrees,
+                                           ((head_wt, names),) if args.require_clean_overlays else ())
         rows = verdicts(base_run, head_run)
         summary = Counter(r["verdict"] for r in rows)
         payload = {
@@ -130,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
             "repeats": args.repeats,
             "per_test_source": args.per_test_source,
             "require_clean_worktrees": args.require_clean_worktrees,
+            "require_clean_overlays": args.require_clean_overlays,
             "collection_errors": {
                 r.ref: r.collection_error for r in (base_run, head_run) if r.collection_error
             },

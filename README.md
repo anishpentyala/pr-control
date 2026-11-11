@@ -499,8 +499,9 @@ Only paths listed in each tree's Git index are guarded. An overlaid head test
 or fixture that did not exist in the base index remains untracked on base, so
 its base-side copy is **not guarded**. The original tracked head-side file is
 checked only when that tree participates in the attempt; with overlay, the
-base attempt checks only the base tree. Use ordinary (non-overlay) mode if the
-tracked original head-test tree must be checked during the base attempt.
+base attempt checks only the base tree. Use the separate explicit-input
+policy below to check copied inputs and original head inputs during base, or
+ordinary (non-overlay) mode for the tracked original head-test tree.
 
 This is trusted-code before/after checking, not tamper-proof tracing. A change
 restored before the final snapshot is invisible; Git index metadata and nested
@@ -539,3 +540,30 @@ This prevents retry reports from crashing the probe; it is not general retry
 plugin support or a replacement for `--repeats`. In particular, custom plugin
 exit statuses such as pytest-rerunfailures' `--fail-on-flaky` exit 7 remain
 unsupported and fail closed.
+
+
+### Explicit overlay-input integrity (opt-in)
+
+Use `--overlay-tests --require-clean-overlays` to check the explicitly copied
+Python tests and `--overlay-fixture` inputs, including newly added files that
+are not tracked in the base Git index. This is separate from
+`--require-clean-worktrees`; use both when both policies matter.
+
+Each base attempt checks both the copied base inputs and their original head
+inputs. Each head attempt checks the head inputs. SHA256 contents, regular-file
+type and the owner executable bit must remain unchanged. Missing, unreadable
+or symlinked inputs fail closed. Other untracked scratch files remain allowed.
+
+After-snapshots also run after timeout cleanup; timeout does not bypass the
+input integrity check. Both diagnostics are retained when applicable.
+
+An observed integrity failure discards that attempt's outcomes and source
+evidence and stops further attempts on that side. If the base input check
+fails, head is not run against potentially changed inputs. JSON and Markdown
+remain available with incomplete-suite diagnostics. The requested repeat count
+is recorded separately from the actual attempts retained in the report.
+
+This is before/after checking for trusted code, not a sandbox, atomic snapshot,
+concurrent-edit guarantee or security attestation. A change restored before
+the after-snapshot is invisible. Implicit fixtures, configuration, dependencies
+and arbitrary untracked paths are not added to this explicit-input policy.
